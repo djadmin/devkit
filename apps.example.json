@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "proxyPort": 8080,
+  "tld": "localhost",
+  "dashboardHost": "dash",
+  "apps": [
+    {
+      "name": "notes-api",
+      "hostname": "notes-api.localhost",
+      "port": 4010,
+      "path": "~/code/notes-api",
+      "repo": "git@github.com:yourname/notes-api.git",
+      "claudeMd": "~/code/notes-api/CLAUDE.md",
+      "startCmd": "npm run dev -- --port 4010",
+      "description": "Personal notes API",
+      "managedBy": "pm2"
+    },
+    {
+      "name": "billing-admin",
+      "hostname": "billing-admin.localhost",
+      "port": 4020,
+      "path": "~/code/billing-admin",
+      "repo": "git@github.com:yourname/billing-admin.git",
+      "claudeMd": null,
+      "startCmd": "pnpm dev --port 4020",
+      "description": "Internal billing dashboard",
+      "managedBy": "pm2"
+    }
+  ]
+}

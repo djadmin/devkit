@@ -1,0 +1,7 @@
+# local registry state
+apps.json
+
+# generated from apps.json
+Caddyfile
+dashboard.html
+.DS_Store

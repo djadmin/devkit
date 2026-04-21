@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+# devkit — local app registry, hostname proxy, pm2 wrapper, dashboard.
+# Source of truth: $DEVKIT_HOME/apps.json
+# Generates:       $DEVKIT_HOME/Caddyfile, $DEVKIT_HOME/dashboard.html
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEVKIT_HOME="${DEVKIT_HOME:-$REPO_HOME}"
+APPS_JSON="$DEVKIT_HOME/apps.json"
+CADDYFILE="$DEVKIT_HOME/Caddyfile"
+DASHBOARD="$DEVKIT_HOME/dashboard.html"
+BREW_CADDYFILE="/opt/homebrew/etc/Caddyfile"
+
+die() { echo "devkit: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
+
+need jq
+
+ensure_registry_dir() {
+  mkdir -p "$DEVKIT_HOME"
+}
+
+ensure_registry() {
+  ensure_registry_dir
+  if [[ ! -f "$APPS_JSON" ]]; then
+    echo '{"version":1,"proxyPort":8080,"tld":"localhost","dashboardHost":"dash","apps":[]}' > "$APPS_JSON"
+  fi
+}
+
+cfg() { jq -r "$1" "$APPS_JSON"; }
+proxy_port()    { cfg '.proxyPort // 8080'; }
+tld()           { cfg '.tld // "localhost"'; }
+dash_host()     { cfg '.dashboardHost // "dash"'; }
+
+url_for() {
+  local host="$1" pp; pp=$(proxy_port)
+  if [[ "$pp" == "80" ]]; then echo "http://$host"; else echo "http://$host:$pp"; fi
+}
+
+# ---------- helpers ----------
+
+detect_repo() {
+  local path="$1"
+  git -C "$path" remote get-url origin 2>/dev/null || true
+}
+
+detect_claude_md() {
+  local path="$1"
+  [[ -f "$path/CLAUDE.md" ]] && echo "$path/CLAUDE.md"
+}
+
+assert_unique() {
+  local name="$1" port="$2" hostname="$3"
+  ensure_registry
+  if jq -e --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null; then
+    return 0
+  fi
+  if jq -e --argjson p "$port" '.apps[] | select(.port==$p)' "$APPS_JSON" >/dev/null; then
+    die "port $port already taken by another app"
+  fi
+  if jq -e --arg h "$hostname" '.apps[] | select(.hostname==$h)' "$APPS_JSON" >/dev/null; then
+    die "hostname $hostname already taken"
+  fi
+}
+
+# ---------- commands ----------
+
+cmd_register() {
+  local name="" path="" port="" cmd="" claude="" repo="" desc="" managed="pm2"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name)       name="$2";    shift 2 ;;
+      --path)       path="$2";    shift 2 ;;
+      --port)       port="$2";    shift 2 ;;
+      --cmd)        cmd="$2";     shift 2 ;;
+      --claude)     claude="$2";  shift 2 ;;
+      --repo)       repo="$2";    shift 2 ;;
+      --desc)       desc="$2";    shift 2 ;;
+      --managed-by) managed="$2"; shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+
+  [[ -n "$name" ]] || die "missing --name"
+
+  if [[ "$managed" == "pm2" ]]; then
+    [[ -n "$path" ]] || die "missing --path (required for managedBy=pm2)"
+    [[ -n "$port" ]] || die "missing --port"
+    [[ -n "$cmd"  ]] || die "missing --cmd"
+    path="$(cd "$path" 2>/dev/null && pwd)" || die "path does not exist: $path"
+    if ! grep -q -- "$port" <<<"$cmd"; then
+      echo "devkit: warning — startCmd does not reference port $port." >&2
+    fi
+  fi
+
+  [[ -z "$claude" && -n "$path" ]] && claude=$(detect_claude_md "$path" || true)
+  [[ -z "$repo" && -n "$path" ]] && repo=$(detect_repo "$path" || true)
+
+  local hostname="$name.$(tld)"
+  assert_unique "$name" "${port:-0}" "$hostname"
+
+  ensure_registry
+  local tmp
+  tmp=$(mktemp)
+  jq --arg n "$name" --arg p "$path" --arg c "${claude:-}" \
+     --arg cmd "${cmd:-}" --argjson port "${port:-0}" --arg h "$hostname" \
+     --arg repo "${repo:-}" --arg desc "$desc" --arg m "$managed" \
+    '.apps |= ((map(select(.name != $n))) + [{
+       name: $n,
+       hostname: $h,
+       port: $port,
+       path: (if $p == "" then null else $p end),
+       repo: (if $repo == "" then null else $repo end),
+       claudeMd: (if $c == "" then null else $c end),
+       startCmd: (if $cmd == "" then null else $cmd end),
+       description: $desc,
+       managedBy: $m
+     }])' "$APPS_JSON" > "$tmp"
+  mv "$tmp" "$APPS_JSON"
+
+  echo "registered $name → $(url_for "$hostname")"
+  cmd_reload
+}
+
+cmd_remove() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit remove <name>"
+  ensure_registry
+  local tmp
+  tmp=$(mktemp)
+  jq --arg n "$name" '.apps |= map(select(.name != $n))' "$APPS_JSON" > "$tmp"
+  mv "$tmp" "$APPS_JSON"
+  command -v pm2 >/dev/null && pm2 delete "$name" >/dev/null 2>&1 || true
+  command -v pm2 >/dev/null && pm2 save >/dev/null 2>&1 || true
+  echo "removed $name"
+  cmd_reload
+}
+
+cmd_list() {
+  ensure_registry
+  local pm2_states="[]"
+  if command -v pm2 >/dev/null 2>&1; then
+    local raw
+    raw=$(pm2 jlist 2>/dev/null | grep -E '^\[' | head -1 || true)
+    if [[ -n "$raw" ]] && jq -e . <<<"$raw" >/dev/null 2>&1; then
+      pm2_states="$raw"
+    fi
+  fi
+  printf "%-18s %-7s %-32s %-9s %s\n" NAME PORT URL STATE PATH
+  while IFS=$'\t' read -r name port hostname path managed; do
+    local state="-"
+    if [[ "$managed" == "pm2" ]]; then
+      state=$(jq -r --arg n "$name" '[.[] | select(.name==$n)][0].pm2_env.status // "stopped"' <<<"$pm2_states")
+    elif [[ "$managed" == "external" ]]; then
+      state="external"
+    fi
+    printf "%-18s %-7s %-32s %-9s %s\n" "$name" "$port" "$(url_for "$hostname")" "$state" "${path:-—}"
+  done < <(jq -r '.apps[] | [.name, (.port|tostring), .hostname, (.path // ""), .managedBy] | @tsv' "$APPS_JSON")
+}
+
+cmd_show() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit show <name>"
+  ensure_registry
+  jq --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON"
+}
+
+# ---------- generation ----------
+
+render_caddyfile() {
+  ensure_registry
+  local pp
+  pp=$(proxy_port)
+  local listen=""
+  [[ "$pp" != "80" ]] && listen=":$pp"
+
+  {
+    echo "# generated by devkit — edit apps.json instead"
+    echo "{"
+    echo "  auto_https off"
+    echo "  admin localhost:2019"
+    echo "}"
+    echo
+    echo "# dashboard"
+    echo "http://$(dash_host).$(tld)$listen {"
+    echo "  root * $DEVKIT_HOME"
+    echo "  rewrite / /dashboard.html"
+    echo "  file_server"
+    echo "}"
+    echo
+    jq -r --arg listen "$listen" '
+      .apps[]
+      | "http://\(.hostname)\($listen) {\n  reverse_proxy localhost:\(.port)\n}\n"
+    ' "$APPS_JSON"
+  } > "$CADDYFILE"
+}
+
+render_dashboard() {
+  ensure_registry
+
+  local rows=""
+  local link_attrs='target="_blank" rel="noopener"'
+  while IFS=$'\t' read -r name hostname port managed path repo claude; do
+    local url
+    url=$(url_for "$hostname")
+    local repo_cell="—"
+    [[ -n "$repo" && "$repo" != "null" ]] && repo_cell="<a href=\"$repo\" $link_attrs>repo</a>"
+    local claude_cell="—"
+    [[ -n "$claude" && "$claude" != "null" ]] && claude_cell="<a href=\"file://$claude\" $link_attrs>CLAUDE.md</a>"
+    local path_cell="—"
+    [[ -n "$path" && "$path" != "null" ]] && path_cell="$path"
+    rows+="        <tr>
+          <td class=\"name\">$name</td>
+          <td><a href=\"$url\" $link_attrs>$hostname</a></td>
+          <td class=\"port\">$port</td>
+          <td class=\"managed\">$managed</td>
+          <td class=\"path\">$path_cell</td>
+          <td>$repo_cell</td>
+          <td>$claude_cell</td>
+          <td><code class=\"copy\" title=\"click to copy\">devkit edit $name</code></td>
+        </tr>
+"
+  done < <(jq -r '.apps[] | [.name, .hostname, (.port|tostring), .managedBy, (.path // ""), (.repo // ""), (.claudeMd // "")] | @tsv' "$APPS_JSON")
+
+  cat > "$DASHBOARD" <<HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>devkit dashboard</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem auto; max-width: 1100px; padding: 0 1rem; color: #1a1a1a; background: #fafafa; }
+  h1 { margin: 0 0 .25rem; font-size: 1.5rem; }
+  p.lede { color: #666; margin: 0 0 1.5rem; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; overflow: hidden; }
+  th, td { padding: .65rem .9rem; text-align: left; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+  th { background: #f6f6f6; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #555; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover { background: #fafbfc; }
+  td.name { font-weight: 600; }
+  td.port { font-variant-numeric: tabular-nums; color: #666; }
+  td.managed { color: #888; font-size: 12px; }
+  td.path { color: #666; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  a { color: #0066cc; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code.copy { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: #f0f0f0; padding: 2px 6px; border-radius: 4px; cursor: pointer; user-select: all; }
+  code.copy:hover { background: #e5e5e5; }
+  footer { margin-top: 1.5rem; color: #888; font-size: 12px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e5e5e5; background: #111; }
+    table { background: #1a1a1a; border-color: #2a2a2a; }
+    th { background: #222; color: #aaa; }
+    th, td { border-color: #2a2a2a; }
+    tr:hover { background: #1f1f1f; }
+    a { color: #6ab4ff; }
+    code.copy { background: #2a2a2a; }
+    code.copy:hover { background: #333; }
+    p.lede, td.port, td.managed, td.path, footer { color: #999; }
+  }
+</style>
+</head>
+<body>
+<h1>devkit dashboard</h1>
+<p class="lede">All registered local apps. Click a hostname to open. Click the edit command to copy.</p>
+<table>
+  <thead><tr><th>Name</th><th>URL</th><th>Port</th><th>Managed</th><th>Path</th><th>Repo</th><th>Claude</th><th>Edit</th></tr></thead>
+  <tbody>
+$rows
+  </tbody>
+</table>
+<footer>Source: $APPS_JSON · Regenerate: <code>devkit reload</code></footer>
+<script>
+document.querySelectorAll('code.copy').forEach(c => {
+  c.addEventListener('click', () => {
+    navigator.clipboard.writeText(c.textContent.trim());
+    const orig = c.textContent;
+    c.textContent = 'copied!';
+    setTimeout(() => c.textContent = orig, 800);
+  });
+});
+</script>
+</body>
+</html>
+HTML
+}
+
+# ---------- proxy lifecycle ----------
+
+caddy_admin_reload() {
+  command -v caddy >/dev/null 2>&1 || return 1
+  caddy reload --config "$CADDYFILE" --address localhost:2019 >/dev/null 2>&1
+}
+
+cmd_reload() {
+  render_caddyfile
+  render_dashboard
+  if caddy_admin_reload; then
+    echo "reloaded Caddy"
+  else
+    echo "Caddy not running (run: sudo brew services start caddy)"
+  fi
+}
+
+cmd_bootstrap() {
+  echo "checking caddy..."
+  if ! command -v caddy >/dev/null 2>&1; then
+    command -v brew >/dev/null 2>&1 || die "homebrew required"
+    echo "installing caddy..."
+    brew install caddy
+  fi
+
+  render_caddyfile
+  render_dashboard
+
+  if [[ -e "$BREW_CADDYFILE" && ! -L "$BREW_CADDYFILE" ]]; then
+    echo "$BREW_CADDYFILE exists and is not a symlink — leaving it alone"
+  elif [[ ! -L "$BREW_CADDYFILE" ]]; then
+    echo "symlinking $BREW_CADDYFILE -> $CADDYFILE"
+    ln -sfn "$CADDYFILE" "$BREW_CADDYFILE"
+  fi
+
+  echo
+  echo "next steps (one-time):"
+  echo "  sudo brew services start caddy"
+  echo "  pm2 startup"
+  echo "  pm2 save"
+  echo
+  echo "then visit: $(url_for "$(dash_host).$(tld)")"
+}
+
+# ---------- pm2 wrappers ----------
+
+resolve_pm2_app() {
+  local name="$1"
+  ensure_registry
+  local managed
+  managed=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .managedBy' "$APPS_JSON")
+  [[ -n "$managed" ]] || die "unknown app: $name"
+  [[ "$managed" == "pm2" ]] || die "$name is managedBy=$managed — devkit does not control its lifecycle"
+}
+
+cmd_start() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit start <name>"
+  need pm2
+  resolve_pm2_app "$name"
+  local path cmd
+  path=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .path' "$APPS_JSON")
+  cmd=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .startCmd' "$APPS_JSON")
+
+  if pm2 describe "$name" >/dev/null 2>&1; then
+    pm2 restart "$name" >/dev/null
+  else
+    pm2 start "$cmd" --name "$name" --cwd "$path"
+  fi
+  pm2 save >/dev/null
+  echo "started $name"
+}
+
+cmd_stop()    { need pm2; pm2 stop "$1" >/dev/null && pm2 save >/dev/null && echo "stopped $1"; }
+cmd_restart() { need pm2; pm2 restart "$1"; }
+cmd_logs()    { need pm2; pm2 logs "$1"; }
+
+# ---------- editor / browser ----------
+
+cmd_open() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit open <name>"
+  ensure_registry
+  local host
+  host=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .hostname' "$APPS_JSON")
+  [[ -n "$host" ]] || die "unknown app: $name"
+  open "$(url_for "$host")"
+}
+
+cmd_edit() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit edit <name>"
+  ensure_registry
+  local path
+  path=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .path // ""' "$APPS_JSON")
+  [[ -n "$path" ]] || die "$name has no path"
+  [[ -d "$path" ]] || die "path missing: $path (run: devkit clone $name)"
+  cd "$path"
+  if command -v claude >/dev/null 2>&1; then
+    exec claude
+  else
+    echo "cd $path"
+    echo "claude not found in PATH."
+    exec "${SHELL:-/bin/zsh}"
+  fi
+}
+
+cmd_clone() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit clone <name>"
+  ensure_registry
+  local path repo
+  path=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .path // ""' "$APPS_JSON")
+  repo=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .repo // ""' "$APPS_JSON")
+  [[ -n "$repo" ]] || die "$name has no repo URL"
+  [[ -n "$path" ]] || die "$name has no path"
+  if [[ -d "$path/.git" ]]; then
+    echo "$name already cloned at $path"
+    return 0
+  fi
+  mkdir -p "$(dirname "$path")"
+  git clone "$repo" "$path"
+}
+
+cmd_clone_all() {
+  ensure_registry
+  jq -r '.apps[] | select(.repo != null and .path != null) | .name' "$APPS_JSON" |
+    while read -r n; do cmd_clone "$n" || true; done
+}
+
+cmd_paths() {
+  cat <<OUT
+REPO_HOME=$REPO_HOME
+DEVKIT_HOME=$DEVKIT_HOME
+APPS_JSON=$APPS_JSON
+CADDYFILE=$CADDYFILE
+DASHBOARD=$DASHBOARD
+OUT
+}
+
+# ---------- help ----------
+
+cmd_help() {
+  cat <<'OUT'
+devkit — local app registry, hostname proxy, dashboard, pm2 wrapper
+
+Lifecycle:
+  devkit register --name N --path P --port N --cmd "C" [--repo URL] [--claude PATH]
+                              [--desc "..."] [--managed-by pm2|external]
+  devkit remove <name>
+  devkit list
+  devkit show <name>
+
+Process (pm2):
+  devkit start <name>
+  devkit stop|restart|logs <name>
+
+Browser / editor:
+  devkit open <name>
+  devkit edit <name>
+
+Sync / portability:
+  devkit clone <name>
+  devkit clone-all
+  devkit bootstrap
+  devkit paths
+
+Internals:
+  devkit reload
+OUT
+}
+
+case "${1:-help}" in
+  register)   shift; cmd_register "$@" ;;
+  remove)     shift; cmd_remove "$@" ;;
+  list)       cmd_list ;;
+  show)       shift; cmd_show "$@" ;;
+  reload)     cmd_reload ;;
+  bootstrap)  cmd_bootstrap ;;
+  start)      shift; cmd_start "$@" ;;
+  stop)       shift; cmd_stop "$@" ;;
+  restart)    shift; cmd_restart "$@" ;;
+  logs)       shift; cmd_logs "$@" ;;
+  open)       shift; cmd_open "$@" ;;
+  edit)       shift; cmd_edit "$@" ;;
+  clone)      shift; cmd_clone "$@" ;;
+  clone-all)  cmd_clone_all ;;
+  paths)      cmd_paths ;;
+  help|--help|-h) cmd_help ;;
+  *) echo "devkit: unknown command: $1" >&2; cmd_help; exit 2 ;;
+esac
