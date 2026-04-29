@@ -124,6 +124,45 @@ cmd_register() {
   cmd_reload
 }
 
+cmd_rename() {
+  local old="${1:-}" new="${2:-}"
+  [[ -n "$old" && -n "$new" ]] || die "usage: devkit rename <old> <new>"
+  ensure_registry
+
+  jq -e --arg n "$old" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null || die "unknown app: $old"
+  if jq -e --arg n "$new" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null; then
+    die "name already taken: $new"
+  fi
+
+  local was_online="false" managed
+  managed=$(jq -r --arg n "$old" '.apps[] | select(.name==$n) | .managedBy' "$APPS_JSON")
+  if [[ "$managed" == "pm2" ]] && command -v pm2 >/dev/null 2>&1 && pm2 describe "$old" >/dev/null 2>&1; then
+    local raw
+    raw=$(pm2 jlist 2>/dev/null | grep -E '^\[' | head -1 || true)
+    if [[ -n "$raw" ]] && jq -e . <<<"$raw" >/dev/null 2>&1; then
+      local s
+      s=$(jq -r --arg n "$old" '[.[] | select(.name==$n)][0].pm2_env.status // ""' <<<"$raw")
+      [[ "$s" == "online" ]] && was_online="true"
+    fi
+    pm2 delete "$old" >/dev/null 2>&1 || true
+  fi
+
+  local new_host="$new.$(tld)"
+  local tmp
+  tmp=$(mktemp)
+  jq --arg old "$old" --arg new "$new" --arg h "$new_host" \
+    '.apps |= map(if .name == $old then .name = $new | .hostname = $h else . end)' \
+    "$APPS_JSON" > "$tmp"
+  mv "$tmp" "$APPS_JSON"
+
+  echo "renamed $old → $new (now at $(url_for "$new_host"))"
+  cmd_reload
+
+  if [[ "$was_online" == "true" ]]; then
+    cmd_start "$new"
+  fi
+}
+
 cmd_remove() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit remove <name>"
@@ -211,8 +250,9 @@ render_dashboard() {
     [[ -n "$claude" && "$claude" != "null" ]] && claude_cell="<a href=\"file://$claude\" $link_attrs>CLAUDE.md</a>"
     local path_cell="—"
     [[ -n "$path" && "$path" != "null" ]] && path_cell="$path"
-    rows+="        <tr>
+    rows+="        <tr data-port=\"$port\" data-managed=\"$managed\">
           <td class=\"name\">$name</td>
+          <td class=\"status\"><span class=\"dot dot-unknown\" title=\"checking…\"></span></td>
           <td><a href=\"$url\" $link_attrs>$hostname</a></td>
           <td class=\"port\">$port</td>
           <td class=\"managed\">$managed</td>
@@ -249,6 +289,12 @@ render_dashboard() {
   a:hover { text-decoration: underline; }
   code.copy { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: #f0f0f0; padding: 2px 6px; border-radius: 4px; cursor: pointer; user-select: all; }
   code.copy:hover { background: #e5e5e5; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+  .dot-unknown { background: #d1d5db; }
+  .dot-up { background: #22c55e; }
+  .dot-down { background: #ef4444; }
+  .dot-ext { background: #a78bfa; }
+  td.status { text-align: center; width: 3rem; }
   footer { margin-top: 1.5rem; color: #888; font-size: 12px; }
   @media (prefers-color-scheme: dark) {
     body { color: #e5e5e5; background: #111; }
@@ -267,7 +313,7 @@ render_dashboard() {
 <h1>devkit dashboard</h1>
 <p class="lede">All registered local apps. Click a hostname to open. Click the edit command to copy.</p>
 <table>
-  <thead><tr><th>Name</th><th>URL</th><th>Port</th><th>Managed</th><th>Path</th><th>Repo</th><th>Claude</th><th>Edit</th></tr></thead>
+  <thead><tr><th>Name</th><th>Status</th><th>URL</th><th>Port</th><th>Managed</th><th>Path</th><th>Repo</th><th>Claude</th><th>Edit</th></tr></thead>
   <tbody>
 $rows
   </tbody>
@@ -282,6 +328,23 @@ document.querySelectorAll('code.copy').forEach(c => {
     setTimeout(() => c.textContent = orig, 800);
   });
 });
+function checkStatus() {
+  document.querySelectorAll('tr[data-port]').forEach(row => {
+    const port = row.dataset.port;
+    const managed = row.dataset.managed;
+    const dot = row.querySelector('.dot');
+    if (managed === 'external') {
+      dot.className = 'dot dot-ext';
+      dot.title = 'external';
+      return;
+    }
+    fetch('http://localhost:' + port, { mode: 'no-cors', cache: 'no-store' })
+      .then(() => { dot.className = 'dot dot-up'; dot.title = 'up'; })
+      .catch(() => { dot.className = 'dot dot-down'; dot.title = 'down'; });
+  });
+}
+checkStatus();
+setInterval(checkStatus, 15000);
 </script>
 </body>
 </html>
@@ -437,6 +500,7 @@ devkit — local app registry, hostname proxy, dashboard, pm2 wrapper
 Lifecycle:
   devkit register --name N --path P --port N --cmd "C" [--repo URL] [--claude PATH]
                               [--desc "..."] [--managed-by pm2|external]
+  devkit rename <old> <new>
   devkit remove <name>
   devkit list
   devkit show <name>
@@ -462,6 +526,7 @@ OUT
 
 case "${1:-help}" in
   register)   shift; cmd_register "$@" ;;
+  rename)     shift; cmd_rename "$@" ;;
   remove)     shift; cmd_remove "$@" ;;
   list)       cmd_list ;;
   show)       shift; cmd_show "$@" ;;
