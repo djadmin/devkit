@@ -5,6 +5,8 @@
 
 set -euo pipefail
 
+DEVKIT_VERSION="0.1.0"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEVKIT_HOME="${DEVKIT_HOME:-$REPO_HOME}"
@@ -91,7 +93,7 @@ cmd_register() {
     [[ -n "$cmd"  ]] || die "missing --cmd"
     path="$(cd "$path" 2>/dev/null && pwd)" || die "path does not exist: $path"
     if ! grep -q -- "$port" <<<"$cmd"; then
-      echo "devkit: warning — startCmd does not reference port $port." >&2
+      echo "devkit: warning — startCmd does not reference port $port. If the app reads the port from config, that may be fine; otherwise the app can drift from its registered URL." >&2
     fi
   fi
 
@@ -328,6 +330,7 @@ document.querySelectorAll('code.copy').forEach(c => {
     setTimeout(() => c.textContent = orig, 800);
   });
 });
+// Live status check — probe each app's localhost port
 function checkStatus() {
   document.querySelectorAll('tr[data-port]').forEach(row => {
     const port = row.dataset.port;
@@ -428,6 +431,36 @@ cmd_stop()    { need pm2; pm2 stop "$1" >/dev/null && pm2 save >/dev/null && ech
 cmd_restart() { need pm2; pm2 restart "$1"; }
 cmd_logs()    { need pm2; pm2 logs "$1"; }
 
+cmd_start_all() {
+  ensure_registry
+  local started=0
+  while IFS= read -r name; do
+    cmd_start "$name" && ((started++)) || true
+  done < <(jq -r '.apps[] | select(.managedBy=="pm2") | .name' "$APPS_JSON")
+  echo "started $started app(s)"
+}
+
+cmd_stop_all() {
+  ensure_registry
+  need pm2
+  local stopped=0
+  while IFS= read -r name; do
+    pm2 stop "$name" >/dev/null 2>&1 && ((stopped++)) || true
+  done < <(jq -r '.apps[] | select(.managedBy=="pm2") | .name' "$APPS_JSON")
+  pm2 save >/dev/null 2>&1
+  echo "stopped $stopped app(s)"
+}
+
+cmd_restart_all() {
+  ensure_registry
+  need pm2
+  local restarted=0
+  while IFS= read -r name; do
+    cmd_start "$name" && ((restarted++)) || true
+  done < <(jq -r '.apps[] | select(.managedBy=="pm2") | .name' "$APPS_JSON")
+  echo "restarted $restarted app(s)"
+}
+
 # ---------- editor / browser ----------
 
 cmd_open() {
@@ -453,7 +486,7 @@ cmd_edit() {
     exec claude
   else
     echo "cd $path"
-    echo "claude not found in PATH."
+    echo "claude not found in PATH. cd'd into the project and opened a shell."
     exec "${SHELL:-/bin/zsh}"
   fi
 }
@@ -465,7 +498,7 @@ cmd_clone() {
   local path repo
   path=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .path // ""' "$APPS_JSON")
   repo=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .repo // ""' "$APPS_JSON")
-  [[ -n "$repo" ]] || die "$name has no repo URL"
+  [[ -n "$repo" ]] || die "$name has no repo URL — set one with devkit register --name $name --repo <url> ..."
   [[ -n "$path" ]] || die "$name has no path"
   if [[ -d "$path/.git" ]]; then
     echo "$name already cloned at $path"
@@ -508,6 +541,7 @@ Lifecycle:
 Process (pm2):
   devkit start <name>
   devkit stop|restart|logs <name>
+  devkit start-all|stop-all|restart-all
 
 Browser / editor:
   devkit open <name>
@@ -524,6 +558,8 @@ Internals:
 OUT
 }
 
+cmd_version() { echo "devkit $DEVKIT_VERSION"; }
+
 case "${1:-help}" in
   register)   shift; cmd_register "$@" ;;
   rename)     shift; cmd_rename "$@" ;;
@@ -532,15 +568,19 @@ case "${1:-help}" in
   show)       shift; cmd_show "$@" ;;
   reload)     cmd_reload ;;
   bootstrap)  cmd_bootstrap ;;
-  start)      shift; cmd_start "$@" ;;
-  stop)       shift; cmd_stop "$@" ;;
-  restart)    shift; cmd_restart "$@" ;;
-  logs)       shift; cmd_logs "$@" ;;
+  start)       shift; cmd_start "$@" ;;
+  stop)        shift; cmd_stop "$@" ;;
+  restart)     shift; cmd_restart "$@" ;;
+  start-all)   cmd_start_all ;;
+  stop-all)    cmd_stop_all ;;
+  restart-all) cmd_restart_all ;;
+  logs)        shift; cmd_logs "$@" ;;
   open)       shift; cmd_open "$@" ;;
   edit)       shift; cmd_edit "$@" ;;
   clone)      shift; cmd_clone "$@" ;;
   clone-all)  cmd_clone_all ;;
   paths)      cmd_paths ;;
+  version|--version|-v) cmd_version ;;
   help|--help|-h) cmd_help ;;
   *) echo "devkit: unknown command: $1" >&2; cmd_help; exit 2 ;;
 esac
