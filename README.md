@@ -1,59 +1,55 @@
 # devkit
 
-You build a lot of apps with Claude. After a while, they're scattered across random ports — 3000, 4010, 5173, 8080 — and you can't remember which is which, what's still running, or how to get back into any of them.
+**Give every local app a home.**
 
-devkit fixes that. Every app gets a permanent home at `http://name.localhost`. One dashboard shows everything. One command gets you back into any project with Claude already running.
+You build a lot of local apps — side projects, POCs, AI experiments. After a while they're scattered across forgotten ports like `:3847`, `:5173`, `:8080`. You can't remember which is which, what's still running, or how to get back into any of them.
 
-The best part: wire it into your global `CLAUDE.md` once, and Claude handles registration automatically. You just open the URL.
+devkit fixes that. One registry, stable URLs, one command to get back in.
 
----
-
-## How it works in practice
-
-You ask Claude to build a dashboard. Claude builds it, registers it with devkit, starts it. You open `http://my-dashboard.localhost`. That's it — you never typed a port.
-
-Next week you ask Claude to build something else. Same thing. Everything shows up at `http://dash.localhost`. Nothing gets lost.
-
-After a reboot: `devkit start-all`. Everything comes back.
+```
+localhost:4839   →   notes.localhost
+localhost:3000   →   dashboard.localhost
+localhost:5173   →   api-tester.localhost
+```
 
 ---
 
-## Setup (one time)
+## Works great with Claude Code
 
-**1. Install**
+Add devkit to your global `CLAUDE.md` once:
+
+```markdown
+## Local Web Apps
+When building any local web app, register it with devkit:
+  devkit register --name <slug> --path <abs-path> --port <port> --cmd "<start-cmd>"
+  devkit start <slug>
+```
+
+From then on, Claude registers every new app automatically. You just visit the URL.
+
+---
+
+## Install
+
+**Requirements:** macOS, [Homebrew](https://brew.sh), `jq`, `pm2`, `caddy`
 
 ```bash
 git clone https://github.com/djadmin/devkit.git ~/devkit
-echo 'export PATH="$HOME/devkit/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
+echo 'export PATH="$HOME/devkit/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+
+brew install jq caddy
+npm install -g pm2
+
 devkit bootstrap
 brew services start caddy
 pm2 startup && pm2 save
 ```
 
-**2. Wire into Claude (the important part)**
-
-Add this to your global `~/.claude/CLAUDE.md`:
-
-```markdown
-## Local Web Apps — devkit
-
-Every local web app goes through devkit. When building a new web app, pick a
-fixed port and run:
-
-  devkit register --name <slug> --path <abs-path> --port <port> --cmd "<start-cmd>"
-  devkit start <slug>
-
-Apps are then reachable at http://<slug>.localhost.
-```
-
-That's it. From now on, Claude registers every new app automatically.
+> Apps default to `http://name.localhost:8080`. Set `"proxyPort": 80` in `apps.json` for clean URLs (requires `sudo caddy`).
 
 ---
 
-## Registering an app yourself
-
-If you're not using Claude, or want to register something manually:
+## Register your first app
 
 ```bash
 devkit register \
@@ -63,74 +59,52 @@ devkit register \
   --cmd "npm run dev -- --port 4010"
 
 devkit start notes
-# → http://notes.localhost is live
+# → http://notes.localhost:8080 is live
 ```
+
+devkit auto-detects the git remote and any `CLAUDE.md` in the project.
 
 ---
 
-## Commands you'll actually use
+## Daily commands
 
-```bash
-devkit list                    # see everything and its status
-devkit open <name>             # open in browser
-devkit edit <name>             # cd into project and launch Claude Code
-devkit start-all               # bring everything back after a reboot
-devkit start|stop <name>       # control individual apps
-devkit rename <old> <new>      # rename an app and its URL
-devkit logs <name>             # tail logs
-```
+| Command | What it does |
+|---|---|
+| `devkit list` | See all apps and their status |
+| `devkit open <name>` | Open in browser |
+| `devkit edit <name>` | cd into project and launch Claude Code |
+| `devkit start-all` | Bring everything back after a reboot |
+| `devkit start / stop <name>` | Control individual apps |
+| `devkit rename <old> <new>` | Rename an app and its URL |
+| `devkit logs <name>` | Tail logs |
+| `devkit show <name>` | Print full app metadata |
 
-Or just open `http://dash.localhost` — the dashboard shows live status for every app.
-
----
-
-## What devkit stores for each app
-
-```json
-{
-  "name": "notes",
-  "hostname": "notes.localhost",
-  "port": 4010,
-  "path": "/Users/you/code/notes",
-  "repo": "git@github.com:you/notes.git",
-  "claudeMd": "/Users/you/code/notes/CLAUDE.md",
-  "startCmd": "npm run dev -- --port 4010",
-  "managedBy": "pm2"
-}
-```
-
-The `claudeMd` field means `devkit edit <name>` opens the project with full AI context intact — no re-explaining what the project is.
-
----
-
-## Requirements
-
-- macOS
-- [Homebrew](https://brew.sh)
-- [Caddy](https://caddyserver.com) (installed by `devkit bootstrap`)
-- [pm2](https://pm2.keyv.io) (`npm install -g pm2`)
-- [jq](https://jqlang.github.io/jq/) (`brew install jq`)
+Or open `http://dash.localhost:8080` — the dashboard shows live status for every app.
 
 ---
 
 ## How state works
 
-- `apps.json` — your local registry, gitignored (stays on your machine)
-- `apps.example.json` — example schema, safe to commit
-- `Caddyfile`, `dashboard.html` — generated from `apps.json`, gitignored
+```
+apps.json        ← your registry (gitignored, stays on your machine)
+apps.example.json ← example schema (committed)
+Caddyfile        ← generated, gitignored
+dashboard.html   ← generated, gitignored
+```
 
 Set `DEVKIT_HOME` to store the registry somewhere other than the repo root.
 
 ---
 
-## Running tests
+## Tests
 
 ```bash
 bash test/test_registry.sh
+# 30 tests, runs in a temp dir, never touches your real registry
 ```
 
 ---
 
-## What's next
+## License
 
-The CLI is the foundation. Ideas on deck: a menu bar app, a web dashboard with drag-to-reorder, and deeper Claude integration. See [IDEAS.md](./IDEAS.md).
+MIT
