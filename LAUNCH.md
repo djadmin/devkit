@@ -1,123 +1,104 @@
-# devkit launch positioning
+# devkit — launch notes
 
-## Core positioning
+## What this is, plainly
 
-`devkit` is a local control plane for builders juggling lots of apps.
+devkit is a small CLI that gives every local web app a stable URL and a home in one registry.
 
-It is not a generic "developer dashboard."
-It is for the specific pain of having too many local apps, too many ports, and too little memory for where everything lives.
+The main reason to use it: when you build a lot of apps with Claude Code, you end up with dozens of things running on random ports. devkit makes that manageable without thinking about it — you wire it into your global `CLAUDE.md` once, and Claude registers every new app automatically.
 
-## Target user
+---
 
-- solo builders
-- indie hackers
-- freelancers juggling client apps
-- AI-heavy developers spinning up many small tools and dashboards
-- anyone with a laptop full of side projects
+## The one-liner
 
-## Problem statement
+> Claude builds the app. devkit gives it a home.
 
-Modern builders do not just run one app.
-They accumulate ten or twenty local apps, each with its own port, folder, repo, and startup command.
-The friction is not building the app. The friction is reopening, routing, and remembering it later.
+Alternatives:
+- Your Claude-built apps deserve better than `localhost:4839`
+- Stop remembering ports. Name your apps.
+- One URL per app. One dashboard for all of them.
+- The registry Claude uses to manage your local apps for you.
 
-## Product promise
+---
 
-When an app exists on your laptop, `devkit` gives it a stable identity.
+## Who this is for
 
-That means:
+People who build a lot of local apps — especially with Claude Code or other AI tools. Indie hackers, solo builders, people who spin up a new POC every week. If you have more than five things running on your laptop and you've forgotten what's on which port, devkit is for you.
 
-- a name
-- a URL
-- a repo path
-- a start command
-- a known way back in
+Not for: teams, production infra, anyone looking for a full-featured dev environment manager. This is intentionally small and opinionated.
 
-## Messaging pillars
+---
 
-1. Stable local identities
-Every app gets a predictable hostname instead of a forgotten port.
+## The story (for HN / blog posts)
 
-2. One registry, not scattered notes
-App metadata lives in one place instead of shell history, browser tabs, and half-remembered folders.
+After a few months of building with Claude Code, I had 20+ local apps across side projects, experiments, and tools I'd forgotten about. They were on ports like 3000, 4010, 5173, 8080 — and I had no idea which was which.
 
-3. Faster context switching
-`devkit edit foo` is the point. Re-entering work should be cheap.
+I built devkit to fix this. Every app gets a name and a URL: `http://notes.localhost`, `http://dashboard.localhost`. One dashboard shows what's running. One command gets me back into any project with Claude already open.
 
-4. Better fit for AI-heavy workflows
-If you spin up many experiments, small apps, or agents, local app sprawl gets worse. `devkit` keeps that sprawl manageable.
+The part I didn't expect to matter: wiring it into my global `CLAUDE.md`. Now whenever I ask Claude to build something new, it registers the app automatically. I literally just visit the URL.
 
-## Taglines
+It's a bash CLI, uses Caddy for routing and pm2 for process management, and stores everything in a gitignored `apps.json`.
 
-- A local control plane for builders with too many apps.
-- Stable localhost URLs for your growing pile of side projects.
-- One registry for every app on your laptop.
-- Give every local app a name, URL, and way back in.
-- Stop remembering ports. Start naming apps.
-- The missing control plane for local development.
+---
 
-## Home page hero options
+## HN post
 
-1. A local control plane for builders juggling lots of apps.
-Stable localhost URLs, one registry, and one command to jump back into any project.
+**Title options (pick one):**
+- Show HN: devkit — stable localhost URLs for all your Claude-built apps
+- Show HN: I built a registry so I could stop forgetting which port each local app is on
+- Show HN: a tiny CLI that gives every local app a home, built for Claude Code workflows
 
-2. Stop remembering ports.
-Give every local app on your laptop a stable name, URL, and restart path.
+**Body:**
+```
+After building lots of local apps with Claude Code, I had 20+ things running on
+random ports I kept forgetting.
 
-3. Your laptop has become a mini cloud.
-`devkit` gives it a control plane.
+devkit gives each app a stable URL (http://name.localhost), registers it in one
+place, and lets you jump back in with `devkit edit name` (which drops into the
+project with Claude Code running).
 
-## HN angle
+The trick that made it actually useful: add a few lines to your global CLAUDE.md,
+and Claude registers every new app automatically. You never type a port number again.
 
-Title ideas:
+It's opinionated — macOS, Caddy, pm2 — but that's what made it shippable.
+Repo: https://github.com/djadmin/devkit
+```
 
-- Show HN: devkit, a local control plane for all the apps on my laptop
-- Show HN: I got tired of forgetting which localhost port each side project used
-- Show HN: stable localhost URLs and a registry for every app I build
+---
 
-HN post shape:
+## X / Twitter
 
-- Start with the personal pain.
-- Show the simplest example: `notes-api.localhost` instead of `localhost:4010`.
-- Explain why this gets worse with AI-generated side projects and experiments.
-- Be honest that it is macOS-first and opinionated.
-- Ask whether others have the same problem or solve it differently.
+```
+Building with Claude Code? You probably have 10+ local apps and can't remember
+which port is which.
 
-## X angle
+devkit gives each one a stable URL like http://notes.localhost.
+Add it to your CLAUDE.md and Claude registers new apps automatically.
 
-Tweet shape:
+→ github.com/djadmin/devkit
+```
 
-- problem in one line
-- 15 to 20 second demo gif
-- one sharp before/after
-- one sentence for who it is for
+---
 
-Example:
+## Messaging to avoid
 
-"I kept losing track of local apps across side projects, client work, and AI experiments, so I built a tiny local control plane.
+- "local control plane" — too infrastructure-y, sounds like k8s
+- "developer dashboard" — sounds like a feature, not a tool
+- anything about pm2 or Caddy in the headline — implementation details
 
-Every app gets a stable URL like `notes-api.localhost`, a saved start command, and a way back in.
+---
 
-If you juggle lots of local apps, this might be useful."
+## Validation questions
 
-## Product Hunt angle
+1. Do Claude Code users actually feel this port-chaos pain?
+2. Does the CLAUDE.md auto-registration click immediately or does it need a demo?
+3. Is macOS-only a dealbreaker for the target audience?
 
-Lead with utility, not architecture.
+---
 
-Suggested subtitle:
-A local control plane for your growing pile of local apps.
+## What's not in v0.1.0 (intentional)
 
-Suggested bullets:
-
-- Stable localhost hostnames for every app
-- One registry for path, repo, and startup command
-- Start, stop, and reopen projects quickly
-- Built for side-project-heavy and AI-heavy workflows
-
-## Validation goal
-
-The first release should validate three things:
-
-- Do builders actually feel this pain strongly?
-- Does the control-plane framing resonate more than the dashboard framing?
-- Which wedge gets attention: named URLs, quick resume, or menu bar control?
+- Menu bar app (good for v2)
+- Web dashboard with live reload (IDEAS.md)
+- Windows / Linux support
+- Multi-machine sync beyond `clone-all`
+- Any Claude API integration beyond `devkit edit` launching the CLI

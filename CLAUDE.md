@@ -4,14 +4,17 @@ This repo contains the public-facing `devkit` CLI and docs.
 
 ## Product shape
 
-`devkit` is a local control plane for builders who run a lot of apps on one machine.
+devkit is a registry and launcher for local web apps — built specifically for people who use Claude Code to build a lot of apps quickly and need a way to manage them without thinking about it.
 
-The core primitives are:
+The pitch: wire devkit into your global CLAUDE.md once, and Claude registers every new web app automatically. Apps appear at `http://name.localhost`. Nothing gets lost.
 
-- a registry of local apps
-- stable localhost hostnames
+Core primitives:
+
+- a registry of local apps (`apps.json`, gitignored)
+- stable localhost hostnames via Caddy
 - `pm2` lifecycle helpers
-- a generated dashboard
+- a generated dashboard at `http://dash.localhost`
+- `devkit edit <name>` → drops into project with Claude Code running
 
 ## Source of truth
 
