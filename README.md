@@ -14,42 +14,44 @@ localhost:5173   →   api-tester.localhost
 
 ---
 
-## Works great with Claude Code
+## Install
 
-Add devkit to your global `CLAUDE.md` once:
+**Option A — one-liner (recommended)**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | bash
+```
+
+Installs everything, starts Caddy, and offers to wire Claude in automatically.
+
+**Option B — Homebrew**
+
+```bash
+brew tap djadmin/tap
+brew install devkit
+```
+
+Then run `devkit bootstrap` and `brew services start caddy` to finish.
+
+---
+
+## Wire into Claude Code
+
+Add this to `~/.claude/CLAUDE.md` and Claude will register every new app automatically — you just visit the URL:
 
 ```markdown
-## Local Web Apps
+## Local Web Apps — devkit
 When building any local web app, register it with devkit:
   devkit register --name <slug> --path <abs-path> --port <port> --cmd "<start-cmd>"
   devkit start <slug>
+Apps are then reachable at http://<slug>.localhost:8080
 ```
 
-From then on, Claude registers every new app automatically. You just visit the URL.
+The install script offers to add this for you. If you used Homebrew, paste it manually.
 
 ---
 
-## Install
-
-**Requirements:** macOS, [Homebrew](https://brew.sh), `jq`, `pm2`, `caddy`
-
-```bash
-git clone https://github.com/djadmin/devkit.git ~/devkit
-echo 'export PATH="$HOME/devkit/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
-
-brew install jq caddy
-npm install -g pm2
-
-devkit bootstrap
-brew services start caddy
-pm2 startup && pm2 save
-```
-
-> Apps default to `http://name.localhost:8080`. Set `"proxyPort": 80` in `apps.json` for clean URLs (requires `sudo caddy`).
-
----
-
-## Register your first app
+## Register an app yourself
 
 ```bash
 devkit register \
@@ -59,7 +61,7 @@ devkit register \
   --cmd "npm run dev -- --port 4010"
 
 devkit start notes
-# → http://notes.localhost:8080 is live
+# → http://notes.localhost:8080
 ```
 
 devkit auto-detects the git remote and any `CLAUDE.md` in the project.
@@ -83,13 +85,21 @@ Or open `http://dash.localhost:8080` — the dashboard shows live status for eve
 
 ---
 
+## Requirements
+
+macOS, [Homebrew](https://brew.sh), `jq`, `caddy`, `pm2`
+
+The install script handles all of these. For Homebrew installs, `npm install -g pm2` is the only manual step.
+
+---
+
 ## How state works
 
 ```
-apps.json        ← your registry (gitignored, stays on your machine)
-apps.example.json ← example schema (committed)
-Caddyfile        ← generated, gitignored
-dashboard.html   ← generated, gitignored
+apps.json          ← your registry (gitignored, stays on your machine)
+apps.example.json  ← example schema (safe to commit)
+Caddyfile          ← generated, gitignored
+dashboard.html     ← generated, gitignored
 ```
 
 Set `DEVKIT_HOME` to store the registry somewhere other than the repo root.
