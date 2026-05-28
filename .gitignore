@@ -5,3 +5,8 @@ apps.json
 Caddyfile
 dashboard.html
 .DS_Store
+
+# internal planning — lives in devkit-internal repo
+LAUNCH.md
+RELEASE_PLAN.md
+IDEAS.md
