@@ -358,16 +358,25 @@ HTML
 
 caddy_admin_reload() {
   command -v caddy >/dev/null 2>&1 || return 1
-  caddy reload --config "$CADDYFILE" --address localhost:2019 >/dev/null 2>&1
+  # Guard: only reload the live Caddy instance when running from the real
+  # DEVKIT_HOME. If BREW_CADDYFILE doesn't symlink to our Caddyfile (e.g.
+  # running in a test temp dir), skip — otherwise we'd corrupt the live proxy.
+  local linked; linked=$(readlink "$BREW_CADDYFILE" 2>/dev/null || true)
+  [[ "$linked" == "$CADDYFILE" ]] || return 0
+  caddy reload --config "$CADDYFILE" --address localhost:2019
 }
 
 cmd_reload() {
   render_caddyfile
   render_dashboard
-  if caddy_admin_reload; then
+  local out; out=$(caddy_admin_reload 2>&1)
+  local code=$?
+  if [[ $code -eq 0 ]]; then
     echo "reloaded Caddy"
   else
-    echo "Caddy not running (run: sudo brew services start caddy)"
+    echo "devkit: Caddy reload failed — is it running? (sudo brew services start caddy)" >&2
+    [[ -n "$out" ]] && echo "$out" >&2
+    return 1
   fi
 }
 
