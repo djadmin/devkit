@@ -119,11 +119,7 @@ struct MenuBarView: View {
         } else if let msg = registry.errorMessage {
             emptyState(icon: "exclamationmark.triangle.fill", title: msg, subtitle: nil)
         } else if registry.apps.isEmpty {
-            emptyState(
-                icon: "square.grid.2x2",
-                title: "No apps registered",
-                subtitle: "Run devkit register … to add one"
-            )
+            OnboardingView()
         } else if !debouncedQuery.isEmpty && sortedApps.isEmpty {
             emptyState(icon: "magnifyingglass", title: "No results for \"\(debouncedQuery)\"", subtitle: nil)
         } else {
