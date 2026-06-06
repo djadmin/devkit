@@ -125,7 +125,7 @@ private struct FoundPortsView: View {
         let slug = (name?.isEmpty == false ? name! : "app-\(port)")
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
-        await DevkitCLI.run("register --name \(slug) --port \(port) --managed-by external")
+        await DevkitCLI.run("register \(slug) --port \(port) --managed-by external")
         tracked.insert(port)
         registry.reload()
     }
@@ -201,7 +201,7 @@ private struct ClaudeSetupView: View {
     private let snippet = """
     ## Local Web Apps — devkit
     When building any local web app, register it with devkit:
-      devkit register --name <slug> --path <abs-path> --port <port> --cmd "<start-cmd>"
+      devkit register <slug> --port <port> --cmd "<start-cmd>"
       devkit start <slug>
     Apps are then reachable at http://<slug>.localhost
     """
