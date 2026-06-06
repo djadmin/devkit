@@ -93,7 +93,7 @@ count=$(jq '.apps | length' "$TMP_HOME/apps.json")
 assert_eq "registry starts empty" "0" "$count"
 
 default_port=$(jq '.proxyPort' "$TMP_HOME/apps.json")
-assert_eq "default proxyPort is 8080" "8080" "$default_port"
+assert_eq "default proxyPort is 80" "80" "$default_port"
 
 # -- register --
 echo "--- register ---"
@@ -112,6 +112,26 @@ assert_eq "app port is 5000" "5000" "$port"
 
 hostname=$(jq -r '.apps[0].hostname' "$TMP_HOME/apps.json")
 assert_eq "hostname is testapp.localhost" "testapp.localhost" "$hostname"
+
+# -- positional name syntax --
+echo "--- positional register syntax ---"
+mkdir -p "$TMP_HOME/fake-positional"
+out=$("$DEVKIT" register positional-app --path "$TMP_HOME/fake-positional" --port 5099 --cmd "node s.js --port 5099" 2>&1 || true)
+assert_contains "positional register prints URL" "positional-app.localhost" "$out"
+pos_name=$(jq -r '.apps[] | select(.name=="positional-app") | .name' "$TMP_HOME/apps.json")
+assert_eq "positional name stored correctly" "positional-app" "$pos_name"
+# clean up
+"$DEVKIT" remove positional-app >/dev/null 2>&1 || true
+
+# -- default path (--path omitted, should use CWD) --
+echo "--- default path = CWD ---"
+mkdir -p "$TMP_HOME/cwd-test" && cd "$TMP_HOME/cwd-test"
+out=$("$DEVKIT" register cwd-app --port 5098 --cmd "node s.js" 2>&1 || true)
+assert_contains "register without --path succeeds" "cwd-app.localhost" "$out"
+stored_path=$(jq -r '.apps[] | select(.name=="cwd-app") | .path' "$TMP_HOME/apps.json")
+assert_eq "path defaults to CWD" "$TMP_HOME/cwd-test" "$stored_path"
+"$DEVKIT" remove cwd-app >/dev/null 2>&1 || true
+cd "$SCRIPT_DIR"
 
 # -- show --
 echo "--- show ---"
@@ -170,7 +190,7 @@ assert_eq "dashboard.html exists" "true" "$( [[ -f "$TMP_HOME/dashboard.html" ]]
 caddy_content=$(cat "$TMP_HOME/Caddyfile")
 assert_contains "Caddyfile has renamed-app" "renamed-app.localhost" "$caddy_content"
 assert_contains "Caddyfile has reuse" "reuse.localhost" "$caddy_content"
-assert_contains "Caddyfile uses port 8080" ":8080" "$caddy_content"
+assert_contains "Caddyfile has http:// prefix" "http://" "$caddy_content"
 
 dash_content=$(cat "$TMP_HOME/dashboard.html")
 assert_contains "dashboard has renamed-app" "renamed-app" "$dash_content"
