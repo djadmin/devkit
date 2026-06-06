@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "proxyPort": 8080,
+  "proxyPort": 80,
   "tld": "localhost",
   "dashboardHost": "dash",
   "apps": [
@@ -13,7 +13,7 @@
       "claudeMd": "~/code/notes-api/CLAUDE.md",
       "startCmd": "npm run dev -- --port 4010",
       "description": "Personal notes API",
-      "managedBy": "pm2"
+      "managedBy": "devkit"
     },
     {
       "name": "billing-admin",
@@ -24,7 +24,18 @@
       "claudeMd": null,
       "startCmd": "pnpm dev --port 4020",
       "description": "Internal billing dashboard",
-      "managedBy": "pm2"
+      "managedBy": "devkit"
+    },
+    {
+      "name": "postgres",
+      "hostname": "postgres.localhost",
+      "port": 5432,
+      "path": null,
+      "repo": null,
+      "claudeMd": null,
+      "startCmd": null,
+      "description": "Local Postgres (managed externally)",
+      "managedBy": "external"
     }
   ]
 }

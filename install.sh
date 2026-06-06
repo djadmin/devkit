@@ -82,16 +82,6 @@ else
   ok "Caddy installed"
 fi
 
-# ── pm2 ──────────────────────────────────────────────────────────────────────
-if command -v pm2 >/dev/null 2>&1; then
-  ok "pm2 already installed"
-elif command -v npm >/dev/null 2>&1; then
-  npm install -g pm2 --silent
-  ok "pm2 installed"
-else
-  warn "Node/npm not found — install Node.js then run: npm install -g pm2"
-fi
-
 # ── bootstrap ────────────────────────────────────────────────────────────────
 step "Bootstrapping devkit..."
 "$DEVKIT_DIR/bin/devkit" bootstrap
@@ -106,25 +96,14 @@ else
   ok "Caddy started"
 fi
 
-# ── pm2 startup ──────────────────────────────────────────────────────────────
-step "Setting up pm2 startup..."
-if command -v pm2 >/dev/null 2>&1; then
-  warn "Run these two commands to make pm2 survive reboots:"
-  echo ""
-  dim "    pm2 startup"
-  dim "    # copy/paste the command it prints, then:"
-  dim "    pm2 save"
-  echo ""
-fi
-
 # ── done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "  ${GREEN}${BOLD}devkit is ready.${NC}"
 echo ""
-echo -e "  Open your dashboard: ${BOLD}http://dash.localhost:8080${NC}"
+echo -e "  Open your dashboard: ${BOLD}http://dash.localhost${NC}"
 echo ""
-echo -e "  Register an app:"
-dim "    devkit register --name myapp --path ~/code/myapp --port 3000 --cmd \"npm start\""
+echo -e "  Register an app (from inside your project directory):"
+dim "    devkit register myapp --port 3000 --cmd \"npm start\""
 dim "    devkit start myapp"
 echo ""
 
@@ -133,10 +112,10 @@ CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 SNIPPET='## Local Web Apps — devkit
 When building any local web app, register it with devkit:
 
-  devkit register --name <slug> --path <abs-path> --port <port> --cmd "<start-cmd>"
+  devkit register <slug> --port <port> --cmd "<start-cmd>"
   devkit start <slug>
 
-Apps are then reachable at http://<slug>.localhost:8080'
+Apps are then reachable at http://<slug>.localhost'
 
 echo -e "  ${BOLD}Wire into Claude Code (recommended):${NC}"
 echo ""
