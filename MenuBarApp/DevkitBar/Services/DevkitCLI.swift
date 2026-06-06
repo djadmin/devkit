@@ -1,7 +1,8 @@
 import Foundation
 
 enum DevkitCLI {
-    // Resolved once at startup; nil means devkit is not installed
+    // Resolved once at startup. Checks known locations first, then falls back
+    // to asking the shell (sources ~/.zshrc so custom PATH installs are found).
     static let binaryPath: String? = {
         let candidates = [
             "/opt/homebrew/bin/devkit",
@@ -9,17 +10,31 @@ enum DevkitCLI {
             NSHomeDirectory() + "/.local/bin/devkit",
             NSHomeDirectory() + "/devkit/bin/devkit",
         ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        if let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return found
+        }
+        // Shell fallback: sources .zshrc so installs via custom PATH are found.
+        // Synchronous and runs once — acceptable for a static initializer.
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        task.arguments = ["-l", "-c", "source ~/.zshrc 2>/dev/null; which devkit"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError  = Pipe()
+        try? task.run()
+        task.waitUntilExit()
+        let path = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return path.isEmpty ? nil : path
     }()
 
-    // Runs a devkit subcommand via a login shell so PATH (Homebrew, nvm, etc.) is intact.
     @discardableResult
     static func run(_ subcommand: String) async -> String {
         guard let binary = binaryPath else { return "" }
         return await withCheckedContinuation { cont in
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            task.arguments = ["-l", "-c", "\(binary) \(subcommand)"]
+            task.arguments = ["-l", "-c", "source ~/.zshrc 2>/dev/null; \(binary) \(subcommand)"]
 
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
