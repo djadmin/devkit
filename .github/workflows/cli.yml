@@ -1,0 +1,27 @@
+name: CLI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  cli-tests:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure jq is installed
+        run: |
+          command -v jq >/dev/null 2>&1 || brew install jq
+
+      - name: Syntax check CLI and tests
+        run: |
+          bash -n bin/devkit
+          bash -n test/test_registry.sh
+          bash -n devkit_test/test_registry.sh
+
+      - name: Run CLI integration suite
+        run: bash test/test_registry.sh

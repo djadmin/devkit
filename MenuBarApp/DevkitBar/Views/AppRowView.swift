@@ -147,8 +147,8 @@ private struct StatusDot: View {
         .onAppear {
             if status == .running { pulse = true }
         }
-        .onChange(of: status) { new in
-            pulse = (new == .running)
+        .onChange(of: status) { _, newValue in
+            pulse = (newValue == .running)
         }
         .animation(.easeInOut(duration: 0.3), value: status)
     }

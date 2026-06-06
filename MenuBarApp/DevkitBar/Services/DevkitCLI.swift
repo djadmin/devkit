@@ -1,6 +1,11 @@
 import Foundation
 
 enum DevkitCLI {
+    struct Result {
+        let output: String
+        let exitCode: Int32
+    }
+
     // Resolved once at startup. Checks known locations first, then falls back
     // to asking the shell (sources ~/.zshrc so custom PATH installs are found).
     static let binaryPath: String? = {
@@ -29,12 +34,14 @@ enum DevkitCLI {
     }()
 
     @discardableResult
-    static func run(_ subcommand: String) async -> String {
-        guard let binary = binaryPath else { return "" }
+    static func run(_ args: [String]) async -> Result {
+        guard let binary = binaryPath else {
+            return Result(output: "devkit not found — install the CLI first", exitCode: 127)
+        }
         return await withCheckedContinuation { cont in
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            task.arguments = ["-l", "-c", "source ~/.zshrc 2>/dev/null; \(binary) \(subcommand)"]
+            task.arguments = ["-l", "-c", "source ~/.zshrc 2>/dev/null; exec \"$@\"", "devkit", binary] + args
 
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -44,22 +51,25 @@ enum DevkitCLI {
             task.standardOutput = out
             task.standardError  = err
 
-            task.terminationHandler = { _ in
-                let data = out.fileHandleForReading.readDataToEndOfFile()
-                cont.resume(returning: String(data: data, encoding: .utf8) ?? "")
+            task.terminationHandler = { task in
+                let data = out.fileHandleForReading.readDataToEndOfFile() + err.fileHandleForReading.readDataToEndOfFile()
+                cont.resume(returning: Result(
+                    output: String(data: data, encoding: .utf8) ?? "",
+                    exitCode: task.terminationStatus
+                ))
             }
             do    { try task.run() }
-            catch { cont.resume(returning: "") }
+            catch { cont.resume(returning: Result(output: "", exitCode: 1)) }
         }
     }
 
     static func appsJSONPath() async -> String? {
-        let output = await run("paths")
-        return output.split(separator: "\n")
+        let result = await run(["paths"])
+        return result.output.split(separator: "\n")
             .first { $0.hasPrefix("APPS_JSON=") }
             .map { String($0.dropFirst("APPS_JSON=".count)) }
     }
 
-    static func start(_ name: String) async { await run("start \(name)") }
-    static func stop(_ name: String)  async { await run("stop \(name)") }
+    static func start(_ name: String) async -> Result { await run(["start", name]) }
+    static func stop(_ name: String)  async -> Result { await run(["stop", name]) }
 }

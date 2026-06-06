@@ -82,7 +82,7 @@ struct MenuBarView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
-                .onChange(of: searchText) { v in searchPublisher.send(v) }
+                .onChange(of: searchText) { _, newValue in searchPublisher.send(newValue) }
                 .onExitCommand { searchText = ""; debouncedQuery = ""; searchFocused = false }
 
             if !searchText.isEmpty {

@@ -15,12 +15,14 @@ CADDYFILE="$DEVKIT_HOME/Caddyfile"
 DASHBOARD="$DEVKIT_HOME/dashboard.html"
 PIDS_DIR="$DEVKIT_HOME/pids"
 LOGS_DIR="$DEVKIT_HOME/logs"
-BREW_CADDYFILE="/opt/homebrew/etc/Caddyfile"
+BREW_CADDYFILE="${DEVKIT_BREW_CADDYFILE:-/opt/homebrew/etc/Caddyfile}"
 
 die() { echo "devkit: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
 
 need jq
+need lsof
+need pgrep
 
 ensure_registry_dir() {
   mkdir -p "$DEVKIT_HOME" "$PIDS_DIR" "$LOGS_DIR"
@@ -31,7 +33,12 @@ ensure_registry() {
   if [[ ! -f "$APPS_JSON" ]]; then
     echo '{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[]}' > "$APPS_JSON"
   fi
-  # Migrate legacy managedBy=pm2 → devkit
+}
+
+migrate_legacy_registry() {
+  ensure_registry
+  jq -e '.apps[]? | select(.managedBy == "pm2")' "$APPS_JSON" >/dev/null 2>&1 || return 0
+
   local tmp; tmp=$(mktemp)
   jq '.apps |= map(if .managedBy == "pm2" then .managedBy = "devkit" else . end)' "$APPS_JSON" > "$tmp"
   mv "$tmp" "$APPS_JSON"
@@ -75,13 +82,162 @@ assert_unique() {
 
 pid_file() { echo "$PIDS_DIR/$1.pid"; }
 log_file() { echo "$LOGS_DIR/$1.log"; }
+app_port() { jq -r --arg n "$1" '.apps[] | select(.name==$n) | .port // empty' "$APPS_JSON"; }
+
+canonical_path() {
+  local target="$1"
+  [[ -n "$target" ]] || return 1
+  if [[ -d "$target" ]]; then
+    (cd "$target" 2>/dev/null && pwd -P) || return 1
+  else
+    local dir base
+    dir=$(dirname "$target")
+    base=$(basename "$target")
+    [[ -d "$dir" ]] || return 1
+    printf '%s/%s\n' "$(cd "$dir" 2>/dev/null && pwd -P)" "$base"
+  fi
+}
+
+app_path() {
+  local path=""
+  path=$(jq -r --arg n "$1" '.apps[] | select(.name==$n) | .path // empty' "$APPS_JSON")
+  canonical_path "$path" 2>/dev/null || printf '%s\n' "$path"
+}
+
+listener_pids_on_port() {
+  local port="$1"
+  lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk '!seen[$0]++'
+}
+
+port_is_listening() {
+  local port="$1"
+  [[ -n "$(listener_pids_on_port "$port")" ]]
+}
+
+wait_for_pid_exit() {
+  local pid="$1" attempts="${2:-50}"
+  local i=0
+  while kill -0 "$pid" 2>/dev/null && (( i < attempts )); do
+    sleep 0.1
+    (( i++ ))
+  done
+  ! kill -0 "$pid" 2>/dev/null
+}
+
+wait_for_port_state() {
+  local port="$1" desired="$2" attempts="${3:-50}"
+  local i=0
+  while (( i < attempts )); do
+    if port_is_listening "$port"; then
+      [[ "$desired" == "listening" ]] && return 0
+    else
+      [[ "$desired" == "free" ]] && return 0
+    fi
+    sleep 0.1
+    (( i++ ))
+  done
+
+  if port_is_listening "$port"; then
+    [[ "$desired" == "listening" ]]
+  else
+    [[ "$desired" == "free" ]]
+  fi
+}
+
+path_belongs_to_app() {
+  local candidate="$1" root="$2"
+  [[ -n "$candidate" && -n "$root" ]] || return 1
+  candidate=$(canonical_path "$candidate" 2>/dev/null || printf '%s\n' "$candidate")
+  root=$(canonical_path "$root" 2>/dev/null || printf '%s\n' "$root")
+  [[ "$candidate" == "$root" || "$candidate" == "$root/"* ]]
+}
+
+pid_cwd() {
+  local pid="$1"
+  lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1
+}
+
+pid_has_open_path() {
+  local pid="$1" target="$2"
+  [[ -n "$target" ]] || return 1
+  target=$(canonical_path "$target" 2>/dev/null || printf '%s\n' "$target")
+  lsof -p "$pid" 2>/dev/null | awk -v target="$target" '$NF == target { found=1 } END { exit(found ? 0 : 1) }'
+}
+
+pid_matches_app_path() {
+  local pid="$1" path="$2"
+  local cwd=""
+  cwd=$(pid_cwd "$pid")
+  path_belongs_to_app "$cwd" "$path"
+}
+
+descendant_pids() {
+  local pid="$1"
+  printf '%s\n' "$pid"
+  local children=""
+  children=$(pgrep -P "$pid" 2>/dev/null || true)
+  local child
+  for child in $children; do
+    descendant_pids "$child"
+  done
+}
+
+tree_contains_pid() {
+  local root="$1" target="$2"
+  local pid
+  for pid in $(descendant_pids "$root"); do
+    [[ "$pid" == "$target" ]] && return 0
+  done
+  return 1
+}
+
+tree_contains_listener_on_port() {
+  local root="$1" port="$2"
+  local listener
+  for listener in $(listener_pids_on_port "$port"); do
+    tree_contains_pid "$root" "$listener" && return 0
+  done
+  return 1
+}
+
+pid_matches_app_identity() {
+  local pid="$1" path="$2" logfile="$3"
+  pid_matches_app_path "$pid" "$path" && return 0
+  pid_has_open_path "$pid" "$logfile"
+}
+
+listener_pids_for_app() {
+  local port="$1" path="$2" logfile="$3"
+  local listener
+  for listener in $(listener_pids_on_port "$port"); do
+    if pid_matches_app_identity "$listener" "$path" "$logfile"; then
+      printf '%s\n' "$listener"
+    fi
+  done | awk '!seen[$0]++'
+}
+
+pid_matches_app() {
+  local pid="$1" port="$2" path="$3" logfile="$4"
+  pid_matches_app_identity "$pid" "$path" "$logfile" && return 0
+  [[ -n "$port" ]] && tree_contains_listener_on_port "$pid" "$port"
+}
 
 is_running() {
   local name="$1"
+  local port path logfile
+  port=$(app_port "$name")
+  path=$(app_path "$name")
+  logfile=$(log_file "$name")
+
   local pf; pf=$(pid_file "$name")
-  [[ -f "$pf" ]] || return 1
-  local pid; pid=$(cat "$pf")
-  kill -0 "$pid" 2>/dev/null
+  if [[ -f "$pf" ]]; then
+    local pid; pid=$(cat "$pf")
+    if kill -0 "$pid" 2>/dev/null && pid_matches_app "$pid" "$port" "$path" "$logfile"; then
+      return 0
+    fi
+  fi
+
+  [[ -n "$port" && -n "$path" && -n "$(listener_pids_for_app "$port" "$path" "$logfile")" ]]
 }
 
 # ---------- commands ----------
@@ -110,14 +266,14 @@ cmd_register() {
 
   [[ -n "$name" ]] || die "usage: devkit register <name> --port N --cmd \"CMD\" [--path P]"
 
-  ensure_registry
+  migrate_legacy_registry
 
   if [[ "$managed" == "devkit" ]]; then
     # Default path to current directory — so you can register from inside the project
     [[ -z "$path" ]] && path="$PWD"
     [[ -n "$port" ]] || die "missing --port"
     [[ -n "$cmd"  ]] || die "missing --cmd"
-    path="$(cd "$path" 2>/dev/null && pwd)" || die "path does not exist: $path"
+    path="$(cd "$path" 2>/dev/null && pwd -P)" || die "path does not exist: $path"
   fi
 
   [[ -z "$claude" && -n "$path" ]] && claude=$(detect_claude_md "$path" || true)
@@ -151,7 +307,7 @@ cmd_register() {
 cmd_rename() {
   local old="${1:-}" new="${2:-}"
   [[ -n "$old" && -n "$new" ]] || die "usage: devkit rename <old> <new>"
-  ensure_registry
+  migrate_legacy_registry
 
   jq -e --arg n "$old" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null || die "unknown app: $old"
   if jq -e --arg n "$new" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null; then
@@ -161,7 +317,10 @@ cmd_rename() {
   local was_running=false
   if is_running "$old"; then
     was_running=true
-    _stop_by_name "$old"
+    local old_port old_path
+    old_port=$(app_port "$old")
+    old_path=$(app_path "$old")
+    _stop_by_name "$old" "$old_port" "$old_path" || die "$old did not stop cleanly before rename"
   fi
   # Move PID/log files to new name
   [[ -f "$(pid_file "$old")" ]] && mv "$(pid_file "$old")" "$(pid_file "$new")" 2>/dev/null || true
@@ -185,9 +344,12 @@ cmd_rename() {
 cmd_remove() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit remove <name>"
-  ensure_registry
+  migrate_legacy_registry
   if is_running "$name"; then
-    _stop_by_name "$name"
+    local port path
+    port=$(app_port "$name")
+    path=$(app_path "$name")
+    _stop_by_name "$name" "$port" "$path" || die "$name did not stop cleanly before remove"
   fi
   rm -f "$(pid_file "$name")" "$(log_file "$name")"
   local tmp; tmp=$(mktemp)
@@ -202,6 +364,7 @@ cmd_list() {
   printf "%-18s %-7s %-32s %-9s %s\n" NAME PORT URL STATE PATH
   while IFS=$'\t' read -r name port hostname path managed; do
     local state="stopped"
+    [[ "$managed" == "pm2" ]] && managed="devkit"
     if [[ "$managed" == "devkit" ]]; then
       is_running "$name" && state="running" || state="stopped"
     elif [[ "$managed" == "external" ]]; then
@@ -232,26 +395,68 @@ _kill_tree() {
 
 _stop_by_name() {
   local name="$1"
+  local port="${2:-}"
+  local path="${3:-}"
   local pf; pf=$(pid_file "$name")
-  [[ -f "$pf" ]] || return 0
-  local pid; pid=$(cat "$pf")
-  if kill -0 "$pid" 2>/dev/null; then
-    { _kill_tree "$pid" TERM
-      local i=0
-      while kill -0 "$pid" 2>/dev/null && (( i < 20 )); do
-        sleep 0.1; (( i++ ))
-      done
-      _kill_tree "$pid" KILL 2>/dev/null || true
+  local logfile; logfile=$(log_file "$name")
+  [[ -n "$port" ]] || port=$(app_port "$name")
+  [[ -n "$path" ]] || path=$(app_path "$name")
+
+  local pid=""
+  if [[ -f "$pf" ]]; then
+    pid=$(cat "$pf")
+  fi
+
+  local pid_is_app=false
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && pid_matches_app "$pid" "$port" "$path" "$logfile"; then
+    pid_is_app=true
+    {
+      _kill_tree "$pid" TERM
+      wait_for_pid_exit "$pid" 30 || true
+      if kill -0 "$pid" 2>/dev/null; then
+        _kill_tree "$pid" KILL 2>/dev/null || true
+        wait_for_pid_exit "$pid" 20 || true
+      fi
       wait "$pid" 2>/dev/null || true
     } 2>/dev/null
   fi
-  rm -f "$pf"
+
+  local app_listeners=""
+  if [[ -n "$port" && -n "$path" ]]; then
+    app_listeners=$(listener_pids_for_app "$port" "$path" "$logfile")
+  fi
+
+  if [[ -n "$app_listeners" ]]; then
+    local listener
+    for listener in $app_listeners; do
+      _kill_tree "$listener" TERM 2>/dev/null || true
+    done
+    wait_for_port_state "$port" free 30 || true
+
+    app_listeners=$(listener_pids_for_app "$port" "$path" "$logfile")
+    if [[ -n "$app_listeners" ]]; then
+      for listener in $app_listeners; do
+        _kill_tree "$listener" KILL 2>/dev/null || true
+      done
+      wait_for_port_state "$port" free 20 || true
+    fi
+  fi
+
+  if [[ -f "$pf" ]]; then
+    if [[ "$pid_is_app" == true && -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    if [[ -n "$port" && -n "$path" && -n "$(listener_pids_for_app "$port" "$path" "$logfile")" ]]; then
+      return 1
+    fi
+    rm -f "$pf"
+  fi
 }
 
 cmd_start() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit start <name>"
-  ensure_registry
+  migrate_legacy_registry
 
   local managed
   managed=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .managedBy' "$APPS_JSON")
@@ -271,13 +476,22 @@ cmd_start() {
   fi
 
   local pf lf; pf=$(pid_file "$name"); lf=$(log_file "$name")
+  local path_for_app="$path"
 
   # Stop any existing tracked process before starting a new one
-  _stop_by_name "$name"
+  _stop_by_name "$name" "$port" "$path_for_app" || {
+    echo "devkit: $name — failed to stop cleanly before restart" >&2
+    return 1
+  }
+  if ! wait_for_port_state "$port" free 20; then
+    echo "devkit: $name — port $port is still in use by another process" >&2
+    return 1
+  fi
 
   # Double-fork via Perl to detach from the calling shell's process group.
   # This prevents the parent shell from printing "Terminated" when we kill the process.
-  # The inner bash writes its own PID ($$) so the pidfile always holds the right PID.
+  # The wrapper bash writes its PID first; once the app binds its port we reconcile
+  # the pidfile to the real listener PID so later status/stop calls target the server.
   ( cd "$path" && DEVKIT_CMD="$cmd" DEVKIT_PF="$pf" DEVKIT_LOG="$lf" \
     perl -e '
       use POSIX qw(setsid);
@@ -290,10 +504,28 @@ cmd_start() {
       exec "/bin/bash", "-c", q(echo $$ > "$DEVKIT_PF"; eval "$DEVKIT_CMD");
     ' )
 
-  sleep 0.6
-  local pid; pid=$(cat "$pf" 2>/dev/null || echo "")
-  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
-    echo "devkit: $name failed to start — check logs: devkit logs $name" >&2
+  local pid="" i=0
+  while (( i < 20 )); do
+    pid=$(cat "$pf" 2>/dev/null || echo "")
+    [[ -n "$pid" ]] && break
+    sleep 0.1
+    (( i++ ))
+  done
+
+  if ! wait_for_port_state "$port" listening 60; then
+    _stop_by_name "$name" "$port" "$path_for_app" >/dev/null 2>&1 || true
+    echo "devkit: $name failed to bind port $port — check logs: devkit logs $name" >&2
+    return 1
+  fi
+
+  local listener_pid
+  listener_pid=$(listener_pids_on_port "$port" | head -n1 || true)
+  if [[ -n "$listener_pid" ]]; then
+    pid="$listener_pid"
+    echo "$pid" > "$pf"
+  elif [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$pf"
+    echo "devkit: $name started listening on $port, but no stable listener PID was found" >&2
     return 1
   fi
 
@@ -303,9 +535,12 @@ cmd_start() {
 cmd_stop() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit stop <name>"
-  ensure_registry
+  migrate_legacy_registry
   is_running "$name" || { echo "devkit: $name is not running"; return 0; }
-  _stop_by_name "$name"
+  local port path
+  port=$(app_port "$name")
+  path=$(app_path "$name")
+  _stop_by_name "$name" "$port" "$path" || die "$name did not stop cleanly"
   echo "stopped $name"
 }
 
@@ -325,7 +560,7 @@ cmd_logs() {
 }
 
 cmd_start_all() {
-  ensure_registry
+  migrate_legacy_registry
   local started=0 failed=0
   while IFS= read -r name; do
     if cmd_start "$name"; then
@@ -340,20 +575,29 @@ cmd_start_all() {
 }
 
 cmd_stop_all() {
-  ensure_registry
-  local stopped=0
+  migrate_legacy_registry
+  local stopped=0 failed=0
   while IFS= read -r name; do
     if is_running "$name"; then
-      _stop_by_name "$name"
-      echo "stopped $name"
-      (( stopped++ ))
+      local port path
+      port=$(app_port "$name")
+      path=$(app_path "$name")
+      if _stop_by_name "$name" "$port" "$path"; then
+        echo "stopped $name"
+        (( stopped++ ))
+      else
+        echo "devkit: failed to stop $name" >&2
+        (( failed++ )) || true
+      fi
     fi
   done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
-  echo "stopped $stopped app(s)"
+  local msg="stopped $stopped app(s)"
+  (( failed > 0 )) && msg="$msg, $failed failed" || true
+  echo "$msg"
 }
 
 cmd_restart_all() {
-  ensure_registry
+  migrate_legacy_registry
   while IFS= read -r name; do
     cmd_restart "$name" || true
   done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")

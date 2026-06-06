@@ -1,89 +1,90 @@
 # Getting Started
 
-Get devkit running in under 5 minutes.
+Get devkit useful in the first five minutes, not after a long setup session.
 
----
+## 1. Install devkit
 
-## Prerequisites
-
-- macOS 13 Ventura or later
-- devkit CLI installed
-- Xcode 16 (to build the menu bar app from source)
-
----
-
-## Step 1 — Install the CLI
+**Recommended**
 
 ```bash
-# Homebrew (coming soon)
-brew install devkit
+brew tap djadmin/tap
+brew install --cask devkit
+devkit bootstrap
+brew services start caddy
+```
 
-# From source
-git clone https://github.com/djadmin/devkit
-cd devkit
-make install
+**CLI only**
+
+```bash
+brew tap djadmin/tap
+brew install devkit
+devkit bootstrap
+brew services start caddy
+```
+
+**Installer script**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | bash
 ```
 
 Verify:
-```bash
-devkit --version
-```
-
----
-
-## Step 2 — Build the menu bar app
 
 ```bash
-cd devkit/MenuBarApp
-./setup.sh        # installs xcodegen if needed, generates .xcodeproj
+devkit version
 ```
 
-Then open in Xcode and run (⌘R), or build to your Applications folder.
+## 2. Open the menu bar app
 
----
+If you installed the cask, launch `DevkitBar`.
 
-## Step 3 — Register your first app
+On first run, it handles the two common starting points:
+
+- **Existing apps already running**: use `Track` or `Track All`
+- **Fresh AI-first setup**: copy the agent snippet and let future apps register themselves
+
+## 3. Choose your onboarding path
+
+### Existing apps
+
+If you already have a service running on a port, track it as external:
 
 ```bash
-# In your project directory
-devkit register my-api --port 3000 --cmd "npm run dev"
+devkit register atlas --port 7780 --managed-by external
 ```
 
-The app appears immediately in your menu bar at `my-api.localhost`.
+devkit will give it a stable `.localhost` URL without trying to supervise the process.
 
----
+### New apps you want devkit to manage
 
-## Step 4 — Set up your AI agent (optional but recommended)
-
-This is the magic part. Add one snippet to your agent's global config and every app it builds from now on auto-registers.
-
-**Claude Code** — add to `~/.claude/CLAUDE.md`:
-
-```markdown
-## devkit
-
-After creating any web app or service:
-devkit register <name> --port <port> --cmd "<start-command>"
+```bash
+devkit register notes --path ~/code/notes --port 4010 --cmd "npm run dev -- --port 4010"
+devkit start notes
 ```
 
-See [agent-setup.md](agent-setup.md) for Cursor, Codex, and other agents.
+Now the app is reachable at `http://notes.localhost`.
 
----
+## 4. Set up your AI agent
 
-## What you'll see
+This is where devkit becomes a habit instead of a one-off tool. Add one global rule and future apps register automatically.
 
-Once an app is registered, the menu bar shows:
+Start with [agent-setup.md](agent-setup.md). Claude Code is the most mature path today, but snippets are included for Cursor, Codex, Copilot, and Windsurf.
 
-- 🟢 **Running** — port is reachable, app is up
-- 🔴 **Stopped** — port not responding
-- 🟣 **External** — managed outside devkit (Docker, Homebrew, etc.)
+## 5. Daily workflow
 
-Click any row to open the app in your browser. Use the ▶ / ■ buttons to start and stop.
+- use `devkit list` to see everything registered
+- use `devkit open <name>` to jump into an app
+- use `devkit start-all` after a reboot
+- use the menu bar app for fast visual control and search
+- use `http://dash.localhost` for the browser dashboard
 
----
+## What good onboarding looks like
 
-## Next steps
+By the end of setup, a new user should be able to answer these four questions immediately:
 
-- [Agent Setup](agent-setup.md) — set up Claude, Cursor, Codex
-- [Supported Stacks](supported-stacks.md) — what frameworks work
-- [FAQ](faq.md) — common questions
+- what apps do I have?
+- which ones are running?
+- how do I open one again?
+- how do future AI-built apps land here automatically?
+
+If those are not obvious, setup is not done yet.

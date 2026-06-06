@@ -12,7 +12,7 @@ Core primitives:
 
 - a registry of local apps (`apps.json`, gitignored)
 - stable localhost hostnames via Caddy
-- `pm2` lifecycle helpers
+- native PID-file lifecycle helpers
 - a generated dashboard at `http://dash.localhost`
 - `devkit edit <name>` → drops into project with Claude Code running
 

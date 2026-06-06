@@ -1,0 +1,24 @@
+name: Installer
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  installer-smoke:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure jq is installed
+        run: |
+          command -v jq >/dev/null 2>&1 || brew install jq
+
+      - name: Syntax check installer smoke test
+        run: bash -n test/test_install.sh
+
+      - name: Run installer smoke test
+        run: bash test/test_install.sh

@@ -1,89 +1,83 @@
 # FAQ
 
-## General
+## What is devkit in one sentence?
 
-**What is devkit, in one sentence?**  
-A macOS menu bar app that tracks every local development service your AI agent builds, giving each one a `.localhost` URL and start/stop control.
+devkit gives every local app your AI builds a stable name, `.localhost` URL, and one place to reopen or control it on macOS.
 
-**Is devkit free?**  
-Yes. The CLI and menu bar app are MIT licensed and free forever.
+## Is devkit only for AI-generated apps?
 
-**Is it open source?**  
-Yes. [github.com/djadmin/devkit](https://github.com/djadmin/devkit)
+No. That is just the strongest use case.
 
-**What's the status?**  
-Public beta. Core features work. Some rough edges. Bug reports welcome via GitHub Issues.
+You can register any local app manually, or track one that is already running. The AI-agent workflow matters because it turns devkit into a habit instead of a one-off tool.
 
----
+## Can I use it with projects I already have?
 
-## Installation
+Yes. That is one of the main onboarding paths.
 
-**How do I install the menu bar app?**  
-Build from source for now — Homebrew cask coming soon. Run `./setup.sh` in the `MenuBarApp/` directory, then open `DevkitBar.xcodeproj` in Xcode and build.
+- use the menu bar app's `Track` / `Track All`
+- or run `devkit register <name> --port <port> --managed-by external`
 
-**Does it auto-update?**  
-Not yet. Auto-update via Sparkle is on the roadmap.
+That gives existing services a stable URL and place in the registry without changing how they are started today.
 
-**What macOS version is required?**  
-macOS 13 Ventura or later. Apple Silicon and Intel both supported.
+## How does devkit know whether an app is running?
 
----
+There are two layers:
 
-## Agent Integration
+- the **CLI** manages devkit-owned apps with pid files plus port ownership checks
+- the **menu bar app** shows fast status based on port reachability
 
-**I set up CLAUDE.md. Will it work for existing projects?**  
-The hook only runs when Claude creates new projects. For existing projects, register manually: `devkit register <name> --port <port>`.
+That split is deliberate. The CLI is responsible for lifecycle safety. The app is responsible for fast visibility.
 
-**Does it work with Cursor's background agent mode?**  
-Yes — Cursor reads `.cursor/rules/devkit.mdc` even in agent mode.
+## Will devkit kill the wrong process?
 
-**Can I use it without an AI agent?**  
-Absolutely. Just register apps manually with `devkit register`. The agent integration is a convenience, not a requirement.
+It is explicitly designed not to.
 
-**My agent registered the app with the wrong port. How do I fix it?**  
-Edit `apps.json` directly (it's plain JSON) or run `devkit register <name> --port <correct-port>` again to update.
+Recent lifecycle hardening makes `start` and `stop` refuse unrelated port conflicts, ignore stale pid files, and recover orphaned listeners that still belong to the registered app path.
 
----
+## What happens if an app crashes?
 
-## How it works
+For devkit-managed apps, the next status check will show it as stopped. You can restart it from the CLI or the menu bar app.
 
-**How does devkit detect if an app is running?**  
-It attempts a TCP connection to `127.0.0.1:<port>` every 8 seconds. If it gets through, the app is running. No process inspection, no PID tracking — just port reachability.
+devkit is not a daemon supervisor like `pm2` or `launchd`. It is a local app registry and lifecycle helper, not a forever-process manager.
 
-**How do the `.localhost` URLs work?**  
-devkit runs a local reverse proxy that routes `appname.localhost` to `localhost:<port>`. You need the devkit CLI running for this to work.
+## Can I use Docker, Homebrew services, or another supervisor with devkit?
 
-**Does devkit start apps automatically when I log in?**  
-Not currently. Launch-at-login for the menu bar app is on the roadmap. Apps themselves need to be started manually or by your normal dev workflow.
+Yes. Register those apps as external:
 
-**What happens if I register the same name twice?**  
-The second registration overwrites the first in `apps.json`.
+```bash
+devkit register redis --port 6379 --managed-by external
+```
 
----
+That gives you naming and URL routing, but not start/stop buttons.
 
-## Troubleshooting
+## Does devkit work without the menu bar app?
 
-**The menu bar app shows "devkit not found".**  
-The CLI binary wasn't found at any of the expected paths. Make sure `devkit` is installed and in your PATH: `which devkit`. Then restart the menu bar app.
+Yes. The CLI is the foundation.
 
-**An app shows as running but it's not responding in the browser.**  
-The port is open but something else might be listening on it. Check with `lsof -i tcp:<port>`.
+You can use:
 
-**Apps disappear after restarting the menu bar app.**  
-The app reads from `apps.json` on startup. If the file was moved or deleted, re-register your apps.
+- `devkit list`
+- `devkit open`
+- `devkit start`
+- `devkit stop`
+- `http://dash.localhost`
 
-**The app shows as stopped but I can access it in the browser.**  
-The `.localhost` URL is routed through devkit's proxy. The proxy might be up even if the underlying app isn't responding on its direct port. Check both `appname.localhost` and `localhost:<port>`.
+The menu bar app just makes the daily workflow better.
 
-**Stop doesn't actually stop the process.**  
-Known beta limitation. devkit stop sends a stop signal to the registered process. If the app is managed by nodemon, pm2, or another process supervisor, the supervisor will restart it. Stop those directly for now.
+## Does devkit work without the CLI?
 
----
+Not really as a product.
 
-## Privacy & Data
+The menu bar app reads the registry, but the CLI is what bootstraps the registry, owns lifecycle, writes pid files, and generates routing config. Treat the CLI as required.
 
-**Does devkit send any data anywhere?**  
-No. Everything runs locally. `apps.json` stays on your machine. No telemetry, no analytics, no account required.
+## Is it macOS-only?
 
-**Does it need internet access?**  
-Only to load web fonts on the landing page. The app itself is entirely offline.
+Today, the full product is intentionally macOS-first.
+
+- the menu bar app is native macOS
+- the install story assumes Homebrew and Caddy
+- the product value is strongest for Mac-based AI-assisted builders
+
+## Does devkit send any data anywhere?
+
+No. State stays on your machine. No telemetry, no analytics, no account.

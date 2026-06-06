@@ -1,8 +1,8 @@
 <div align="center">
   <img src="DevkitBar/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="96" alt="devkit icon" />
   <h1>devkit</h1>
-  <p><strong>Every app your AI builds, tracked.</strong></p>
-  <p>A macOS menu bar app for developers who ship too many things.</p>
+  <p><strong>The home for every local app your AI builds.</strong></p>
+  <p>The native macOS control plane for your devkit registry.</p>
 
   <p>
     <img src="https://img.shields.io/badge/status-beta-orange?style=flat-square" alt="Beta" />
@@ -17,198 +17,92 @@
 
 ---
 
-## What is devkit?
+## Why This App Exists
 
-You use Claude Code, Cursor, or Codex to build apps. You now have 12 local projects. Half are on random ports. You don't know which ones are running.
+The CLI solves registration, routing, and lifecycle. The menu bar app solves the part people actually feel every day:
 
-devkit fixes this.
+- "What is running right now?"
+- "Which app was on `:7780`?"
+- "How do I reopen the thing Claude made yesterday?"
+- "Can I stop or start that app without dropping back into a terminal?"
 
-Add one line to your AI agent's config and every app it builds automatically registers itself — getting a clean `.localhost` URL and appearing in your menu bar with real-time status.
+If you build lots of local tools, devkit gives them a shelf. The menu bar app is that shelf.
 
-```
-nova.localhost      🟢 running
-forge.localhost     🟢 running  
-orbit.localhost     🔴 stopped
-beacon.localhost    🟢 running
-```
+## Best Fit
 
-No config per project. No remembering ports. No terminal tab soup.
+This app is built for:
 
----
+- Claude Code, Cursor, and Codex users who create lots of small local apps
+- indie hackers and prototypers with a growing pile of `localhost` projects
+- people who want existing running apps and future AI-built apps to live in one place
 
-## Quick Start
+## Install
 
-### 1. Install
+**Recommended**
 
 ```bash
-# via Homebrew (installs CLI + Mac app)
 brew tap djadmin/tap
 brew install --cask devkit
+devkit bootstrap
+brew services start caddy
+```
 
-# or build from source
+**Build from source**
+
+```bash
 git clone https://github.com/djadmin/devkit
 cd devkit/MenuBarApp
 ./setup.sh
 open DevkitBar.xcodeproj
 ```
 
-### 2. Register your first app
+## First-Run Experience
 
-```bash
-devkit register my-api --port 3000 --cmd "npm run dev"
-```
+When you open the menu bar app, onboarding is designed for the two real starting points:
 
-### 3. Set up your AI agent (one-time global setup)
+### You Already Have Apps Running
 
-Add the snippet for your agent — every app it builds will auto-register from now on. See **[Agent Setup →](docs/agent-setup.md)**
+devkit scans for open local ports that are not yet registered. You can:
 
----
+- `Track` one port at a time
+- `Track All` to bring your current pile of apps into devkit immediately
 
-## Agent Setup
+Tracked ports are registered as external apps, so devkit gives them names and URLs without trying to take over their process management.
 
-This is devkit's core feature. One config line → every AI-built project auto-registers.
+### You Want Future Apps To Register Themselves
 
-### Claude Code
+The second onboarding step gives you a ready-to-paste Claude Code snippet. Once added globally, future apps Claude builds can:
 
-Add to `~/.claude/CLAUDE.md` (global) or `CLAUDE.md` in any project:
+- register themselves
+- get a stable `.localhost` URL
+- appear in the menu bar without manual setup
 
-```markdown
-## devkit — App Registration
+See [docs/agent-setup.md](docs/agent-setup.md) for Cursor, Codex, Copilot, and Windsurf.
 
-After creating any web application or local service, register it:
+## What The App Does Well
 
-```bash
-devkit register <app-name> --port <port> --cmd "<start-command>"
-```
+- live list of running, stopped, and external apps
+- search by app name or hostname
+- one-click open, copy URL, start, and stop
+- bulk `Start All` / `Stop All` actions
+- registry file watching, so changes appear without a manual refresh
+- onboarding that works for both fresh installs and existing running apps
 
-- Use lowercase-hyphenated names (e.g. my-api, auth-service)
-- Run after the project structure exists, not before
-- Skip if devkit is not installed: check with `which devkit`
-```
+## Status Model
 
-### Cursor
+The menu bar app reads `apps.json` and checks whether each port is reachable.
 
-Create `.cursor/rules/devkit.mdc` in your project (or add to Cursor Settings → Rules for global):
+- for **devkit-managed apps**, the CLI owns lifecycle safety, pid files, logs, and restart behavior
+- for **external apps**, the menu bar app gives you visibility and routing, but no lifecycle control
 
-```markdown
----
-description: Register new web apps with devkit after creating them
-alwaysApply: true
----
+That split is intentional: the CLI is the source of truth for process management, and the app is the fast visual layer on top.
 
-After creating any web application or service, run:
-devkit register <app-name> --port <port> --cmd "<start-command>"
-```
+## Docs
 
-### OpenAI Codex
-
-Add to `~/.codex/AGENTS.md` (global):
-
-```markdown
-## devkit — App Registration
-
-After creating any web application or local service:
-devkit register <app-name> --port <port> --cmd "<start-command>"
-```
-
-> Copy-paste ready snippets for all agents: [docs/agent-setup.md](docs/agent-setup.md)
-
----
-
-## Features
-
-- **Menu bar status** — see all registered apps and whether they're running at a glance
-- **Start / stop** — control services directly from the menu bar
-- **Search** — filter by name or hostname when you have many apps
-- **Grouped sections** — running apps float to the top, stopped at the bottom
-- **Bulk actions** — Start All / Stop All per section
-- **Copy URL** — one click to copy the `.localhost` URL
-- **Auto-focus search** — open the menu bar and start typing immediately
-- **Agent-first** — built to work with Claude Code, Cursor, Codex out of the box
-- **Local proxy** — every app gets a clean `appname.localhost` URL via devkit's proxy
-- **File watching** — `apps.json` is watched; changes appear instantly without a reload
-- **⌘R** — keyboard shortcut to reload the registry
-
----
-
-## Supported Stacks
-
-devkit tracks **any process that listens on a TCP port**. Framework and language don't matter.
-
-| Stack | Example start command |
-|---|---|
-| Node / Next.js | `npm run dev` |
-| Node / Express, Fastify | `node server.js` |
-| Ruby on Rails | `rails server -p 3000` |
-| Python / FastAPI | `uvicorn main:app --port 8000` |
-| Python / Django | `python manage.py runserver 8000` |
-| Go | `go run main.go` |
-| Rust / Axum, Actix | `cargo run` |
-| PHP / Laravel | `php artisan serve` |
-| Java / Spring Boot | `./mvnw spring-boot:run` |
-| .NET | `dotnet run` |
-| Static / Vite | `vite --port 5173` |
-
-If it has a port, devkit can track it. See [docs/supported-stacks.md](docs/supported-stacks.md) for full details.
-
----
-
-## Requirements
-
-- macOS 13 Ventura or later (Apple Silicon and Intel)
-- [devkit CLI](https://github.com/djadmin/devkit) installed
-- Xcode 16+ (to build from source)
-
----
-
-## Project Structure
-
-```
-MenuBarApp/
-├── DevkitBar/
-│   ├── Models/          # AppEntry, AppStatus
-│   ├── Services/        # AppRegistry, DevkitCLI, PortChecker
-│   └── Views/           # MenuBarView, AppRowView, HeaderView, FooterView
-├── docs/                # Documentation
-├── project.yml          # XcodeGen project definition
-└── setup.sh             # Bootstrap script
-```
-
----
-
-## FAQ
-
-**Does devkit start apps automatically?**  
-No. devkit registers and monitors apps. Starting is either manual (click ▶ in the menu bar) or handled by your agent/shell.
-
-**Do I need to register every project manually?**  
-Only once — after that your AI agent handles it automatically via `CLAUDE.md` / `AGENTS.md`.
-
-**Does it work without the devkit CLI?**  
-The menu bar app reads `apps.json` directly. As long as you have a valid `apps.json`, the app works.
-
-**What's the difference between devkit and LocalCan?**  
-LocalCan gives you pretty URLs and ngrok tunnels. devkit gives you control over your entire dev stack — start, stop, monitor, and share the configuration with your team. They solve adjacent problems.
-
-**Is it open source?**  
-Yes. MIT license. The core CLI and menu bar app are free forever.
-
-> More in [docs/faq.md](docs/faq.md)
-
----
-
-## Contributing
-
-PRs welcome. Please open an issue first for anything beyond small bug fixes.
-
-```bash
-git clone https://github.com/djadmin/devkit
-cd devkit/MenuBarApp
-./setup.sh          # installs xcodegen, generates .xcodeproj
-open DevkitBar.xcodeproj
-```
-
----
+- [Getting Started](docs/getting-started.md)
+- [Agent Setup](docs/agent-setup.md)
+- [Supported Stacks](docs/supported-stacks.md)
+- [FAQ](docs/faq.md)
 
 ## License
 

@@ -26,7 +26,7 @@ struct OnboardingView: View {
     private var scanningView: some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
-            Text("Looking for running apps…")
+            Text("Looking for local apps already running…")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
@@ -34,6 +34,7 @@ struct OnboardingView: View {
         .padding(.vertical, 32)
     }
 
+    @MainActor
     private func scan() async {
         let registered = Set(registry.apps.map(\.port))
         let found = await PortScanner.scan(excluding: registered)
@@ -53,6 +54,7 @@ private struct FoundPortsView: View {
 
     @State private var names: [Int: String] = [:]
     @State private var tracked: Set<Int> = []
+    @State private var tracking: Set<Int> = []
     @State private var busy = false
 
     private var allTracked: Bool { ports.allSatisfy { tracked.contains($0) } }
@@ -61,24 +63,29 @@ private struct FoundPortsView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Banner
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(Color(hex: "f59e0b"))
-                    .imageScale(.small)
-                Text("Found \(ports.count) app\(ports.count == 1 ? "" : "s") running")
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                if !allTracked {
-                    Button {
-                        Task { await trackAll() }
-                    } label: {
-                        Text("Track All")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(hex: "22c55e"))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(Color(hex: "f59e0b"))
+                        .imageScale(.small)
+                    Text("Found \(ports.count) running app\(ports.count == 1 ? "" : "s")")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    if !allTracked {
+                        Button {
+                            Task { await trackAll() }
+                        } label: {
+                            Text(busy ? "Tracking…" : "Track All")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color(hex: "22c55e"))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(busy || !tracking.isEmpty)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(busy)
                 }
+                Text("Track what is already open so it gets a stable name, URL, and a place in devkit.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -90,7 +97,8 @@ private struct FoundPortsView: View {
                 PortRow(
                     port: port,
                     name: binding(for: port),
-                    isTracked: tracked.contains(port)
+                    isTracked: tracked.contains(port),
+                    isBusy: busy || tracking.contains(port)
                 ) {
                     Task { await track(port: port) }
                 }
@@ -105,7 +113,7 @@ private struct FoundPortsView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.right")
                         .imageScale(.small)
-                    Text("Set up with Claude Code instead")
+                    Text("Make future apps auto-register")
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
@@ -120,6 +128,7 @@ private struct FoundPortsView: View {
         Binding(get: { names[port] ?? "" }, set: { names[port] = $0 })
     }
 
+    @MainActor
     private func track(port: Int) async {
         let name = names[port]?.trimmingCharacters(in: .whitespaces)
         let raw = (name?.isEmpty == false ? name! : "app-\(port)")
@@ -129,15 +138,40 @@ private struct FoundPortsView: View {
         let slug = raw.replacingOccurrences(of: #"[^a-z0-9\-]"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let safeName = slug.isEmpty ? "app-\(port)" : slug
-        await DevkitCLI.run("register \(safeName) --port \(port) --managed-by external")
+        guard !tracking.contains(port) else { return }
+
+        tracking.insert(port)
+        registry.errorMessage = nil
+        defer { tracking.remove(port) }
+
+        let result = await DevkitCLI.run([
+            "register",
+            safeName,
+            "--port",
+            String(port),
+            "--managed-by",
+            "external",
+        ])
+        guard result.exitCode == 0 else {
+            let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            registry.errorMessage = message.isEmpty ? "Could not track app on port \(port)" : message
+            return
+        }
+
+        names[port] = safeName
         tracked.insert(port)
         registry.reload()
     }
 
+    @MainActor
     private func trackAll() async {
         busy = true
-        for port in untracked { await track(port: port) }
-        busy = false
+        defer { busy = false }
+
+        for port in untracked {
+            await track(port: port)
+            if registry.errorMessage != nil { break }
+        }
     }
 }
 
@@ -147,6 +181,7 @@ private struct PortRow: View {
     let port: Int
     @Binding var name: String
     let isTracked: Bool
+    let isBusy: Bool
     let onTrack: () -> Void
 
     @State private var hovered = false
@@ -179,14 +214,16 @@ private struct PortRow: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .focused($focused)
-                    .onSubmit { if !name.isEmpty { onTrack() } }
+                    .disabled(isBusy)
+                    .onSubmit { if !name.isEmpty && !isBusy { onTrack() } }
 
                 Spacer()
 
-                Button("Track") { onTrack() }
+                Button(isBusy ? "Tracking…" : "Track") { onTrack() }
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(hovered ? Color(hex: "22c55e") : Color(hex: "22c55e").opacity(0.6))
                     .buttonStyle(.plain)
+                    .disabled(isBusy)
                     .onHover { hovered = $0 }
                     .animation(.easeOut(duration: 0.1), value: hovered)
             }
@@ -204,19 +241,19 @@ private struct ClaudeSetupView: View {
 
     private let snippet = """
     ## Local Web Apps — devkit
-    When building any local web app, register it with devkit:
+    After creating any local web app or service:
       devkit register <slug> --port <port> --cmd "<start-cmd>"
       devkit start <slug>
-    Apps are then reachable at http://<slug>.localhost
+    The app should be reachable at http://<slug>.localhost
     """
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             VStack(alignment: .leading, spacing: 3) {
-                Text("Wire up Claude Code")
+                Text("Make future apps show up automatically")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Every app Claude builds will appear here automatically.")
+                Text("One global rule. New apps Claude builds get a name, URL, and place here without manual setup.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -258,8 +295,8 @@ private struct ClaudeSetupView: View {
                     .padding(6)
                 }
 
-                StepRow(n: "2", text: "Ask Claude to build a web app")
-                StepRow(n: "3", text: "It registers itself and appears here ✦")
+                StepRow(n: "2", text: "Ask Claude to build a local app")
+                StepRow(n: "3", text: "It registers itself and appears here with a .localhost URL")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -267,7 +304,7 @@ private struct ClaudeSetupView: View {
             Divider()
 
             // Manual register hint
-            Text("Or run devkit register … to add an app manually")
+            Text("Already have apps running? Track them above, or run devkit register … manually.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 16)

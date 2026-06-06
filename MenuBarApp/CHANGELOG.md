@@ -26,7 +26,7 @@ All notable changes to devkit are documented here.
 
 **Known issues (beta)**
 
-- Stop may not kill externally-supervised processes (pm2, nodemon, launchd-managed)
+- Externally-supervised processes (nodemon, launchd, custom respawners) can come back after stop
 - Auto-update not yet implemented
 - Launch at login not yet implemented
 - Homebrew cask not yet published

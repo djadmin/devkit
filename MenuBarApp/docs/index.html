@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>devkit — Every app your AI builds, tracked.</title>
-  <meta name="description" content="A macOS menu bar app for developers who ship too many things. Every app your AI agent builds gets a .localhost URL and appears in your menu bar automatically." />
+  <title>devkit — The home for every local app your AI builds.</title>
+  <meta name="description" content="devkit gives every local app your AI builds a stable name, .localhost URL, and one place to reopen or control it on macOS." />
   <meta property="og:title" content="devkit" />
-  <meta property="og:description" content="Every app your AI builds, tracked. Open source macOS menu bar app." />
+  <meta property="og:description" content="The home for every local app your AI builds. Open source macOS app and CLI." />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
@@ -314,9 +314,9 @@
         <div class="badge-pip"></div>
         Public beta · Open source · MIT
       </div>
-      <h1>Every app your AI<br>builds, <em>auto-tracked.</em></h1>
+      <h1>The home for every<br>local app your AI <em>builds.</em></h1>
       <p class="hero-sub">
-        Add one line to your AI agent's config. Every project it builds gets a <code>.localhost</code> URL and appears in your menu bar — automatically.
+        If Claude, Cursor, or Codex keeps leaving you with a pile of localhost ports, devkit turns them into named apps you can reopen, route, and control from one place.
       </p>
       <div class="hero-actions">
         <a href="https://github.com/djadmin/devkit/releases" class="btn-primary">Download for Mac</a>
@@ -378,29 +378,31 @@
 <!-- HOW IT WORKS -->
 <section class="section" id="how">
   <div class="section-tag">How it works</div>
-  <h2>Three steps. Then automatic.</h2>
-  <p class="section-sub">Set it up once and every AI-built project takes care of itself.</p>
+  <h2>Start with the mess you already have.</h2>
+  <p class="section-sub">Track existing running apps today, then let future AI-built projects land here automatically.</p>
   <div class="steps">
     <div class="step">
       <div class="step-num">1</div>
-      <div class="step-title">Install devkit</div>
-      <div class="step-text">Install the CLI and the macOS menu bar app.</div>
-      <div class="step-code">brew install devkit
-# menu bar app: see GitHub</div>
+      <div class="step-title">Install and bootstrap</div>
+      <div class="step-text">Install the CLI, menu bar app, and local proxy once.</div>
+      <div class="step-code">brew tap djadmin/tap
+brew install --cask devkit
+devkit bootstrap</div>
     </div>
     <div class="step">
       <div class="step-num">2</div>
-      <div class="step-title">Add one line to your agent</div>
-      <div class="step-text">Tell your AI agent to register every new app it builds.</div>
-      <div class="step-code"># In ~/.claude/CLAUDE.md:
-After creating any web app,
-run: devkit register &lt;name&gt;
-  --port &lt;port&gt;</div>
+      <div class="step-title">Track or auto-register</div>
+      <div class="step-text">Bring already-running apps into devkit now, or add one rule so future apps register themselves.</div>
+      <div class="step-code">devkit register atlas --port 7780
+  --managed-by external
+
+devkit register &lt;slug&gt; --port &lt;port&gt;
+  --cmd "&lt;start-cmd&gt;"</div>
     </div>
     <div class="step">
       <div class="step-num">3</div>
-      <div class="step-title">Build. It just appears.</div>
-      <div class="step-text">Every new project auto-registers. Opens in one click.</div>
+      <div class="step-title">Reopen from one place</div>
+      <div class="step-text">Every app gets a stable name, URL, and place you can come back to later.</div>
       <div class="step-code">nova.localhost   🟢 running
 forge.localhost  🟢 running
 orbit.localhost  🔴 stopped</div>
@@ -413,8 +415,8 @@ orbit.localhost  🔴 stopped</div>
 <!-- AGENT SETUP -->
 <section class="section" id="agents">
   <div class="section-tag">Agent setup</div>
-  <h2>Works with your agent.</h2>
-  <p class="section-sub">Add the snippet to your agent's config once. Every project it builds from then on auto-registers.</p>
+  <h2>One rule to your agent. Less localhost entropy forever.</h2>
+  <p class="section-sub">Claude Code is the most mature path today, but the same pattern works across Cursor, Codex, and other agent-driven workflows.</p>
   <div class="agents">
     <div class="agent-card">
       <div class="agent-name">Claude Code <span class="agent-status status-works">Working</span></div>
@@ -442,7 +444,7 @@ devkit register &lt;name&gt; \
   --port &lt;port&gt;</div>
     </div>
     <div class="agent-card">
-      <div class="agent-name">Any agent</div>
+      <div class="agent-name">Manual or mixed workflow</div>
       <div class="agent-code"><!-- Register manually anytime -->
 devkit register my-api \
   --port 3000 \
@@ -457,61 +459,61 @@ devkit register my-api \
 <!-- COMPARISON -->
 <section class="section">
   <div class="section-tag">Why devkit</div>
-  <h2>The gap it fills.</h2>
-  <p class="section-sub">The only tool that combines a native Mac UI with full stack control — and treats your AI agent as the primary user.</p>
+  <h2>It solves the part other local tools leave behind.</h2>
+  <p class="section-sub">Most alternatives solve routing or process running. devkit is about remembering, reopening, and controlling the long tail of local apps your AI keeps creating.</p>
   <div class="comp-wrap">
     <table>
       <thead>
         <tr>
           <th>Tool</th>
           <th class="you">devkit</th>
-          <th>LocalCan</th>
-          <th>puma-dev</th>
-          <th>Foreman</th>
+          <th>Port proxy</th>
+          <th>Procfile runner</th>
+          <th>Shell scripts</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><div class="tool-name">Price</div></td>
-          <td class="you"><span class="yes">Free &amp; open source</span></td>
-          <td>$87 one-time</td>
-          <td><span class="yes">Free</span></td>
-          <td><span class="yes">Free</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Native macOS UI</div></td>
-          <td class="you"><span class="yes">✓ menu bar</span></td>
-          <td><span class="yes">✓ menu bar</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="no">✗</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Start / stop services</div></td>
-          <td class="you"><span class="yes">✓</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="partial">CLI only</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Any stack</div><div class="tool-sub">Node, Rails, Go, Python…</div></td>
+          <td><div class="tool-name">Stable `.localhost` URLs</div></td>
           <td class="you"><span class="yes">✓</span></td>
           <td><span class="yes">✓</span></td>
-          <td><span class="partial">Rack only</span></td>
-          <td><span class="yes">✓</span></td>
+          <td><span class="no">✗</span></td>
+          <td><span class="no">✗</span></td>
+        </tr>
+        <tr>
+          <td><div class="tool-name">Start / stop lifecycle</div></td>
+          <td class="you"><span class="yes">✓ safe restart flow</span></td>
+          <td><span class="no">✗</span></td>
+          <td><span class="partial">Per project</span></td>
+          <td><span class="partial">Ad hoc</span></td>
+        </tr>
+        <tr>
+          <td><div class="tool-name">Remember app path + command</div></td>
+          <td class="you"><span class="yes">✓ registry</span></td>
+          <td><span class="no">✗</span></td>
+          <td><span class="partial">Project-local only</span></td>
+          <td><span class="no">✗</span></td>
         </tr>
         <tr>
           <td><div class="tool-name">Agent integration</div><div class="tool-sub">Auto-register on build</div></td>
-          <td class="you"><span class="yes">✓ Core feature</span></td>
+          <td class="you"><span class="yes">✓ core feature</span></td>
           <td><span class="no">✗</span></td>
           <td><span class="no">✗</span></td>
           <td><span class="no">✗</span></td>
         </tr>
         <tr>
-          <td><div class="tool-name">Git-shareable registry</div></td>
-          <td class="you"><span class="yes">✓ apps.json</span></td>
+          <td><div class="tool-name">Existing app discovery</div><div class="tool-sub">Track what is already running</div></td>
+          <td class="you"><span class="yes">✓ Track All</span></td>
           <td><span class="no">✗</span></td>
           <td><span class="no">✗</span></td>
-          <td><span class="partial">Procfile</span></td>
+          <td><span class="no">✗</span></td>
+        </tr>
+        <tr>
+          <td><div class="tool-name">Single place for many projects</div><div class="tool-sub">One shelf for your local apps</div></td>
+          <td class="you"><span class="yes">✓</span></td>
+          <td><span class="partial">Routing only</span></td>
+          <td><span class="partial">Per repo</span></td>
+          <td><span class="no">✗</span></td>
         </tr>
       </tbody>
     </table>

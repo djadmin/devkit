@@ -1,145 +1,137 @@
 # Agent Setup
 
-The whole point of devkit is that your AI agent registers apps automatically. You set this up once — globally — and every project the agent builds from then on appears in your menu bar.
+The strongest version of devkit is simple:
 
----
+Set one global rule once, and every local app your AI builds gets a name, start command, and `.localhost` URL automatically.
+
+## The Rule You Want
+
+No matter which agent you use, the instruction should push toward this behavior:
+
+- after scaffolding a local web app or service, choose a lowercase-hyphenated slug
+- register it with `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+- start it with `devkit start <slug>`
+- skip registration if `devkit` is not installed
 
 ## Claude Code
 
-**Global config** (recommended): `~/.claude/CLAUDE.md`  
+**Global config**: `~/.claude/CLAUDE.md`  
 **Project config**: `CLAUDE.md` in the repo root
 
-```markdown
-## devkit — App Registration
+Copy-paste:
 
-After creating any web application, API server, or local service, register it with devkit:
+````markdown
+## Local Web Apps — devkit
+After creating any local web app or service:
+  choose a lowercase-hyphenated slug
+  run `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+  run `devkit start <slug>`
+Skip this if `devkit` is not installed.
+The app should be reachable at http://<slug>.localhost
+````
 
-```bash
-devkit register <app-name> \
-  --port <port> \
-  --cmd "<start-command>" \
-  --description "<one-line description>"
-```
-
-Rules:
-- app-name: lowercase, hyphenated (e.g. my-api, auth-service, dashboard-ui)
-- Register AFTER the project structure exists, not before
-- Skip if devkit is not installed: check with `which devkit`
-```
-
-**Status**: ✅ Working — this is the origin of the project.
-
----
+Claude Code is the most mature and most important integration for devkit.
 
 ## Cursor
 
-**Project rule**: `.cursor/rules/devkit.mdc` in repo root  
-**Global rule**: Cursor Settings → Rules → User Rules (plain text, no frontmatter)
+**Project rule**: `.cursor/rules/devkit.mdc`  
+**Global rule**: Cursor Settings → Rules → User Rules
 
-```markdown
+Copy-paste:
+
+````markdown
 ---
-description: Register new web apps and services with devkit after creating them
+description: Register new local apps with devkit after scaffolding them
 alwaysApply: true
 ---
 
-## devkit — App Registration
-
-After creating any web application or service, run:
-
-```bash
-devkit register <app-name> --port <port> --cmd "<start-command>"
-```
-
-- Use lowercase-hyphenated names (e.g. my-api, task-ui)
-- Register after the app structure exists
-- Skip if devkit is not installed: `which devkit`
-```
-
-> Note: Cursor has no global project rules equivalent. For global coverage, use Cursor Settings → Rules.
-
-**Status**: 🧪 Snippet written, needs real-world testing.
-
----
+After creating any local web app or service:
+- choose a lowercase-hyphenated slug
+- run `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+- run `devkit start <slug>`
+- skip this if `devkit` is not installed
+````
 
 ## OpenAI Codex
 
 **Global config**: `~/.codex/AGENTS.md`  
-**Project config**: `AGENTS.md` in repo root
+**Project config**: `AGENTS.md` in the repo root
 
-Codex reads configs hierarchically: global → repo root → subdirectory. Global placement is recommended.
+Copy-paste:
 
-```markdown
-## devkit — App Registration
-
-After creating any web application or local service, register it with devkit:
-
-```bash
-devkit register <app-name> --port <port> --cmd "<start-command>"
-```
-
-- Naming: lowercase-hyphenated (e.g. task-api, dashboard-ui)
-- Register after the project structure is created
-- Skip if devkit is not installed: `which devkit`
-```
-
-**Status**: 🧪 Snippet written, needs real-world testing.
-
----
+````markdown
+## Local Web Apps — devkit
+After creating any local web app or service:
+  run `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+  run `devkit start <slug>`
+Use lowercase-hyphenated slugs and skip if `devkit` is not installed.
+````
 
 ## GitHub Copilot
 
-**Project config**: `.github/copilot-instructions.md` in repo root  
-(No global config available — project-level only)
+**Project config**: `.github/copilot-instructions.md`
 
-```markdown
-## devkit — App Registration
+Copy-paste:
 
-After scaffolding any web application or service, register it with devkit:
-
-```bash
-devkit register <app-name> --port <port>
-```
-
-This gives the app a .localhost URL tracked in the devkit menu bar.
-```
-
-**Status**: 🧪 Snippet written, needs real-world testing.
-
----
+````markdown
+## Local Web Apps — devkit
+After creating any local web app or service:
+- run `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+- run `devkit start <slug>`
+- use a lowercase-hyphenated slug
+````
 
 ## Windsurf
 
-**Project config**: `.windsurfrules` in repo root  
+**Project config**: `.windsurfrules`  
 **Global config**: Windsurf Settings → Global Rules
 
-```
-## devkit — App Registration
+Copy-paste:
 
-After creating any web application or local service:
-devkit register <app-name> --port <port> --cmd "<start-command>"
+````text
+## Local Web Apps — devkit
+After creating any local web app or service:
+- run devkit register <slug> --port <port> --cmd "<start-cmd>"
+- run devkit start <slug>
+- use a lowercase-hyphenated slug
+- skip this if devkit is not installed
+````
 
-This registers the app at <app-name>.localhost for tracking in devkit.
-```
+## Naming Guidance
 
-**Status**: 🧪 Snippet written, needs real-world testing.
+Good names:
 
----
+- `atlas`
+- `notes-api`
+- `ops-dashboard`
+- `billing-admin`
 
-## The register command
+Bad names:
 
-```
-devkit register <name> [options]
+- `My App`
+- `test`
+- `server-final`
+- `app2`
 
-Options:
-  --port <port>         Port the app listens on (required)
-  --cmd <command>       Command to start the app
-  --description <text>  Short description
-```
+The name becomes part of the URL, so treat it like a stable hostname.
 
-Example:
+## When To Use `--managed-by external`
+
+If the app is already started by something else, do not ask your agent to make devkit supervise it.
+
+Use this instead:
 
 ```bash
-devkit register my-api --port 3000 --cmd "npm run dev" --description "REST API"
+devkit register postgres --port 5432 --managed-by external
 ```
 
-This writes an entry to `apps.json` and the app immediately appears in the menu bar at `my-api.localhost`.
+That is right for Docker containers, Homebrew services, databases, and any process that devkit should not start or stop itself.
+
+## What Success Looks Like
+
+After setup, a normal flow should look like this:
+
+1. Ask your agent to build a local app.
+2. The agent registers it with devkit.
+3. The app appears in the menu bar and at `http://<slug>.localhost`.
+4. Later, you can reopen it with `devkit open <slug>` or from the menu bar.

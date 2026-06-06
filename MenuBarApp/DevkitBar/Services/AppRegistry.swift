@@ -141,11 +141,17 @@ final class AppRegistry: ObservableObject {
         guard !pendingOps.contains(app.id) else { return }
         pendingOps.insert(app.id)
         statuses[app.id] = .checking
+        errorMessage = nil
 
         Task {
             defer { pendingOps.remove(app.id) }
 
-            await DevkitCLI.start(app.name)
+            let result = await DevkitCLI.start(app.name)
+            guard result.exitCode == 0 else {
+                statuses[app.id] = .stopped
+                errorMessage = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                return
+            }
 
             // Poll until the port responds (up to 6s)
             for _ in 0..<10 {
@@ -163,20 +169,21 @@ final class AppRegistry: ObservableObject {
         guard !pendingOps.contains(app.id) else { return }
         pendingOps.insert(app.id)
         statuses[app.id] = .checking
+        errorMessage = nil
 
         Task {
             defer { pendingOps.remove(app.id) }
 
-            // 1. Tell devkit to stop it (updates its own process table)
-            await DevkitCLI.stop(app.name)
+            let result = await DevkitCLI.stop(app.name)
+            guard result.exitCode == 0 else {
+                let stillUp = await PortChecker.isReachable(port: app.port)
+                statuses[app.id] = stillUp ? .running : .stopped
+                errorMessage = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                return
+            }
 
-            // 2. Kill by port — targets the LISTENING process only (-sTCP:LISTEN),
-            //    works regardless of what devkit's stop command does.
-            //    SIGTERM first, then SIGKILL 500ms later if still alive.
-            await killListeningProcess(on: app.port)
-
-            // 3. Verify: poll until port is actually closed (up to 4s)
-            for _ in 0..<8 {
+            // Verify: poll until port is actually closed (up to 6s)
+            for _ in 0..<12 {
                 try? await Task.sleep(for: .milliseconds(500))
                 if !(await PortChecker.isReachable(port: app.port)) {
                     statuses[app.id] = .stopped
@@ -184,33 +191,9 @@ final class AppRegistry: ObservableObject {
                 }
             }
 
-            // Port is still open after 4s — let polling decide the real status
-            // (process might be managed externally and respawned)
+            // Port is still open after 6s — let polling decide the real status.
             let stillUp = await PortChecker.isReachable(port: app.port)
             statuses[app.id] = stillUp ? .running : .stopped
-        }
-    }
-
-    // MARK: – Port kill
-
-    /// Kills the process listening on the given TCP port.
-    /// Uses `-sTCP:LISTEN` so only the server process is targeted, not clients connected to it.
-    private func killListeningProcess(on port: Int) async {
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/bin/sh")
-            task.arguments = ["-c", """
-                pids=$(lsof -nP -iTCP:\(port) -sTCP:LISTEN -t 2>/dev/null)
-                if [ -n "$pids" ]; then
-                    echo "$pids" | xargs kill -TERM 2>/dev/null
-                    sleep 0.5
-                    pids=$(lsof -nP -iTCP:\(port) -sTCP:LISTEN -t 2>/dev/null)
-                    [ -n "$pids" ] && echo "$pids" | xargs kill -KILL 2>/dev/null
-                fi
-            """]
-            task.terminationHandler = { _ in cont.resume() }
-            do    { try task.run() }
-            catch { cont.resume() }
         }
     }
 

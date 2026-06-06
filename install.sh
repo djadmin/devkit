@@ -4,8 +4,12 @@
 
 set -euo pipefail
 
-DEVKIT_DIR="$HOME/devkit"
-DEVKIT_REPO="https://github.com/djadmin/devkit.git"
+DEVKIT_DIR="${DEVKIT_DIR:-$HOME/devkit}"
+DEVKIT_REPO="${DEVKIT_REPO:-https://github.com/djadmin/devkit.git}"
+DEVKIT_NONINTERACTIVE="${DEVKIT_NONINTERACTIVE:-0}"
+DEVKIT_SKIP_BREW_SERVICES="${DEVKIT_SKIP_BREW_SERVICES:-0}"
+DEVKIT_SKIP_CLAUDE_SETUP="${DEVKIT_SKIP_CLAUDE_SETUP:-0}"
+DEVKIT_LOCAL_WORKTREE="${DEVKIT_LOCAL_WORKTREE:-0}"
 
 # ── colours ──────────────────────────────────────────────────────────────────
 BOLD='\033[1m'
@@ -40,7 +44,12 @@ fi
 
 # ── Clone or update devkit ───────────────────────────────────────────────────
 step "Installing devkit..."
-if [[ -d "$DEVKIT_DIR/.git" ]]; then
+if [[ "$DEVKIT_LOCAL_WORKTREE" == "1" && -d "$DEVKIT_REPO" ]]; then
+  rm -rf "$DEVKIT_DIR"
+  mkdir -p "$(dirname "$DEVKIT_DIR")"
+  cp -R "$DEVKIT_REPO" "$DEVKIT_DIR"
+  ok "devkit copied from local worktree to $DEVKIT_DIR"
+elif [[ -d "$DEVKIT_DIR/.git" ]]; then
   git -C "$DEVKIT_DIR" pull --quiet
   ok "devkit updated at $DEVKIT_DIR"
 else
@@ -50,10 +59,13 @@ fi
 
 # ── PATH ─────────────────────────────────────────────────────────────────────
 step "Setting up PATH..."
-EXPORT_LINE='export PATH="$HOME/devkit/bin:$PATH"'
+EXPORT_LINE="export PATH=\"$DEVKIT_DIR/bin:\$PATH\""
 added=0
-for rc in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+rc_candidates=("$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc")
+has_existing_rc=0
+for rc in "${rc_candidates[@]}"; do
   [[ -f "$rc" ]] || continue
+  has_existing_rc=1
   if ! grep -q 'devkit/bin' "$rc" 2>/dev/null; then
     echo "" >> "$rc"
     echo "# devkit" >> "$rc"
@@ -62,8 +74,15 @@ for rc in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     added=1
   fi
 done
+if [[ $has_existing_rc -eq 0 ]]; then
+  rc="$HOME/.zshrc"
+  echo "# devkit" > "$rc"
+  echo "$EXPORT_LINE" >> "$rc"
+  ok "Created $rc"
+  added=1
+fi
 [[ $added -eq 0 ]] && ok "PATH already configured"
-export PATH="$HOME/devkit/bin:$PATH"
+export PATH="$DEVKIT_DIR/bin:$PATH"
 
 # ── jq ───────────────────────────────────────────────────────────────────────
 step "Checking dependencies..."
@@ -89,7 +108,9 @@ ok "devkit bootstrapped"
 
 # ── Caddy service ────────────────────────────────────────────────────────────
 step "Starting Caddy..."
-if brew services list | grep -q "caddy.*started"; then
+if [[ "$DEVKIT_SKIP_BREW_SERVICES" == "1" ]]; then
+  warn "Skipping brew services start (DEVKIT_SKIP_BREW_SERVICES=1)"
+elif brew services list | grep -q "caddy.*started"; then
   ok "Caddy already running"
 else
   brew services start caddy
@@ -106,6 +127,9 @@ echo -e "  Register an app (from inside your project directory):"
 dim "    devkit register myapp --port 3000 --cmd \"npm start\""
 dim "    devkit start myapp"
 echo ""
+echo -e "  Already have something running elsewhere?"
+dim "    devkit register existing-app --port 3000 --managed-by external"
+echo ""
 
 # ── Claude integration ───────────────────────────────────────────────────────
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
@@ -120,7 +144,10 @@ Apps are then reachable at http://<slug>.localhost'
 echo -e "  ${BOLD}Wire into Claude Code (recommended):${NC}"
 echo ""
 
-if [[ -f "$CLAUDE_MD" ]] && grep -q 'devkit' "$CLAUDE_MD"; then
+if [[ "$DEVKIT_SKIP_CLAUDE_SETUP" == "1" || "$DEVKIT_NONINTERACTIVE" == "1" ]]; then
+  dim "Skipping Claude Code wiring in non-interactive mode"
+  echo ""
+elif [[ -f "$CLAUDE_MD" ]] && grep -q 'devkit' "$CLAUDE_MD"; then
   ok "devkit already in $CLAUDE_MD — nothing to do"
   echo ""
 else

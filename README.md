@@ -1,194 +1,186 @@
 # devkit
 
-**Give every local app a home.**
+**The home for every local app your AI builds.**
 
-You build a lot of local apps — side projects, POCs, AI experiments. After a while they're scattered across forgotten ports like `:3847`, `:5173`, `:8080`. You can't remember which is which, what's still running, or how to get back into any of them.
+If Claude, Cursor, or Codex keeps leaving you with a pile of forgotten `localhost` ports, devkit turns those apps into named projects you can route, reopen, and control from one place.
 
-devkit fixes that. One registry, stable URLs, one command to get back in.
-
-```
+```text
 localhost:4839   →   notes.localhost
 localhost:3000   →   dashboard.localhost
 localhost:5173   →   api-tester.localhost
 ```
 
----
+devkit gives you:
+
+- stable `.localhost` URLs
+- one registry for app name, port, path, and start command
+- safe `start` / `stop` / `restart` for devkit-managed apps
+- logs, dashboard, and a native macOS menu bar app
+- a way to track already-running apps without reworking them
+
+## Who It's For
+
+devkit is strongest for people who:
+
+- use Claude Code, Cursor, or Codex to spin up lots of small local web apps
+- keep many prototypes, admin tools, dashboards, or side projects on one Mac
+- want to get back to an app later without remembering the port, folder, or start command
+
+It is less compelling if you only ever run one or two long-lived services, or if your team already lives entirely inside Docker Compose or Kubernetes.
 
 ## Install
 
-**Option A — CLI + Menu bar app (recommended)**
+**Option A — CLI + Menu Bar App**
 
 ```bash
 brew tap djadmin/tap
 brew install --cask devkit
-```
-
-Installs the CLI and the macOS menu bar app in one shot. Then run:
-
-```bash
 devkit bootstrap
 brew services start caddy
 ```
 
-**Option B — CLI only (Homebrew)**
+**Option B — CLI Only**
 
 ```bash
 brew tap djadmin/tap
 brew install devkit
+devkit bootstrap
+brew services start caddy
 ```
 
-Then run `devkit bootstrap` and `brew services start caddy` to finish.
-
-**Option C — one-liner**
+**Option C — Installer Script**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | bash
 ```
 
-Installs the CLI, starts Caddy, and offers to wire Claude in automatically. Build the menu bar app from source separately (see below).
+The script installs the CLI, bootstraps the registry and proxy, and offers to wire Claude Code automatically.
 
----
+## Start The Way You Actually Work
 
-## Wire into Claude Code
+### 1. You Already Have Apps Running
 
-Add this to `~/.claude/CLAUDE.md` and Claude will register every new app automatically — you just visit the URL:
-
-```markdown
-## Local Web Apps — devkit
-When building any local web app, register it with devkit:
-  devkit register <slug> --port <port> --cmd "<start-cmd>"
-  devkit start <slug>
-Apps are then reachable at http://<slug>.localhost
-```
-
-The install script offers to add this for you. If you used Homebrew, paste it manually.
-
----
-
-## Register an app yourself
+Open the menu bar app and use `Track` / `Track All`, or register one directly:
 
 ```bash
-# From inside your project directory:
-devkit register notes --port 4010 --cmd "npm run dev -- --port 4010"
-devkit start notes
-# → http://notes.localhost
-
-# Or specify a path explicitly:
-devkit register notes --path ~/code/notes --port 4010 --cmd "npm run dev -- --port 4010"
+devkit register atlas --port 7780 --managed-by external
 ```
 
-devkit auto-detects the git remote and any `CLAUDE.md` in the project.
+That gives the app a stable name and URL without asking devkit to own its lifecycle.
 
----
+### 2. You Want Future AI-Built Apps To Auto-Register
 
-## Daily commands
+Add this once to `~/.claude/CLAUDE.md`:
+
+````markdown
+## Local Web Apps — devkit
+After creating any local web app or service:
+  devkit register <slug> --port <port> --cmd "<start-cmd>"
+  devkit start <slug>
+The app should be reachable at http://<slug>.localhost
+````
+
+See [MenuBarApp/docs/agent-setup.md](MenuBarApp/docs/agent-setup.md) for Cursor, Codex, Copilot, and Windsurf snippets.
+
+### 3. You Prefer Manual CLI Control
+
+```bash
+devkit register notes --path ~/code/notes --port 4010 --cmd "npm run dev -- --port 4010"
+devkit start notes
+devkit open notes
+```
+
+## Daily Commands
 
 | Command | What it does |
 |---|---|
-| `devkit list` | See all apps and their status |
-| `devkit open <name>` | Open in browser |
-| `devkit edit <name>` | cd into project and launch Claude Code |
+| `devkit list` | See every registered app and its status |
+| `devkit open <name>` | Open the app in the browser |
+| `devkit edit <name>` | Jump into the project and launch Claude Code |
+| `devkit start <name>` | Start one app |
+| `devkit stop <name>` | Stop one app |
+| `devkit restart <name>` | Restart one app safely |
 | `devkit start-all` | Bring everything back after a reboot |
-| `devkit start / stop <name>` | Control individual apps |
-| `devkit rename <old> <new>` | Rename an app and its URL |
-| `devkit logs <name>` | Tail logs |
-| `devkit show <name>` | Print full app metadata |
+| `devkit stop-all` | Stop every devkit-managed app |
+| `devkit logs <name>` | Tail the log file |
+| `devkit show <name>` | Print the full stored metadata |
 
-Or open `http://dash.localhost` — the dashboard shows live status for every app.
+You can also open `http://dash.localhost` for a browser dashboard, or use the macOS menu bar app for search, start/stop, open, and copy URL.
 
----
+## How Lifecycle Works
+
+devkit supports two operating modes:
+
+- **devkit-managed apps**: you register a `--cmd`, then devkit owns `start`, `stop`, logs, pid files, and restart safety.
+- **external apps**: you register with `--managed-by external`, and devkit tracks naming, URL routing, and status without trying to supervise the process.
+
+For devkit-managed apps, the CLI now uses both **PID state and port ownership** to avoid stale pid files, orphaned listeners, and unrelated process kills during restart cycles.
+
+## Reliability
+
+Release confidence is backed by automated macOS checks:
+
+- `62` CLI lifecycle tests
+- `16` installer smoke tests
+- GitHub Actions on fresh macOS runners for CLI and installer paths
+
+The CLI explicitly covers stale pid files, orphan recovery, restart pressure, port conflicts, and failed starts.
 
 ## Requirements
 
-macOS 13+, [Homebrew](https://brew.sh), `jq`, `caddy`
+- macOS 13+
+- [Homebrew](https://brew.sh)
+- `jq`
+- `caddy`
 
-The install script handles all of these automatically.
+The installer handles these automatically. Homebrew users only need to run `devkit bootstrap` and start the Caddy service once.
 
----
+## Menu Bar App
 
-## Menu bar app
+The native menu bar app is the easiest way to use devkit day to day:
 
-A native macOS menu bar app ships alongside the CLI. It shows live status for all your apps, lets you start/stop/open them without touching a terminal, and updates instantly when `apps.json` changes.
+- see running, stopped, and external apps at a glance
+- search by app name or hostname
+- start and stop devkit-managed apps
+- copy URLs and open apps without touching the terminal
+- track existing running ports during onboarding
 
-Install via Homebrew (see above) or build from source:
+Install it with the cask above, or build from source:
 
 ```bash
 git clone https://github.com/djadmin/devkit
 cd devkit/MenuBarApp
 ./setup.sh
-open DevkitBar.xcodeproj   # then ⌘R
+open DevkitBar.xcodeproj
 ```
 
-See [MenuBarApp/README.md](MenuBarApp/README.md) for full details.
+See [MenuBarApp/README.md](MenuBarApp/README.md) for the app-specific docs.
 
----
+## State And Files
 
-## How state works
-
-```
-apps.json          ← your registry (gitignored, stays on your machine)
-apps.example.json  ← example schema (safe to commit)
-Caddyfile          ← generated, gitignored
-dashboard.html     ← generated, gitignored
-```
-
-`DEVKIT_HOME` controls where devkit looks for `apps.json`. It defaults to the directory where devkit is installed. Set it to a custom path to keep your registry elsewhere:
-
-```bash
-export DEVKIT_HOME=~/my-registry   # add to ~/.zshrc
+```text
+apps.json          ← your local registry
+apps.example.json  ← schema example
+Caddyfile          ← generated proxy config
+dashboard.html     ← generated dashboard
+logs/<name>.log    ← app logs
+pids/<name>.pid    ← PID file for devkit-managed apps
 ```
 
----
+`DEVKIT_HOME` controls where devkit stores this state. It defaults to the install directory, usually `~/devkit`.
 
-## Migrating or reinstalling
+## Releasing
 
-If you're doing a fresh install and want to keep your existing apps:
-
-```bash
-# 1. Back up before reinstalling
-cp "$DEVKIT_HOME/apps.json" ~/apps_backup.json
-
-# 2. Install fresh
-curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | bash
-
-# 3. Restore your registry
-cp ~/apps_backup.json ~/devkit/apps.json
-devkit reload
-devkit start-all
-```
-
----
-
-## Releasing (maintainers)
-
-Cut a release by tagging — GitHub Actions builds the Mac app and updates the cask automatically:
-
-```bash
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-The workflow (`release.yml`) will:
-1. Build `DevkitBar.app` on a macOS runner
-2. Zip and upload it to the GitHub Release
-3. Update `Casks/devkit.rb` in `djadmin/homebrew-tap` with the new SHA256
-
-**First-time setup:** add a `HOMEBREW_TAP_GITHUB_TOKEN` secret to this repo with a GitHub token that has write access to `djadmin/homebrew-tap`:
-
-```bash
-gh auth token | gh secret set HOMEBREW_TAP_GITHUB_TOKEN --repo djadmin/devkit --body -
-```
-
----
+If you are shipping devkit itself, use [RELEASING.md](RELEASING.md).
 
 ## Tests
 
 ```bash
 bash test/test_registry.sh
-# 30 tests, runs in a temp dir, never touches your real registry
+bash test/test_install.sh
 ```
 
----
+Both suites run in temp state and do not touch your real registry.
 
 ## License
 
