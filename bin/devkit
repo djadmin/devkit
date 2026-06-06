@@ -88,6 +88,12 @@ is_running() {
 
 cmd_register() {
   local name="" path="" port="" cmd="" claude="" repo="" desc="" managed="devkit"
+
+  # Accept positional name as first arg: devkit register my-api --port 3000 --cmd "..."
+  if [[ $# -gt 0 && "$1" != --* ]]; then
+    name="$1"; shift
+  fi
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name)       name="$2";    shift 2 ;;
@@ -102,16 +108,14 @@ cmd_register() {
     esac
   done
 
-  [[ -n "$name" ]] || die "missing --name"
+  [[ -n "$name" ]] || die "usage: devkit register <name> --port N --cmd \"CMD\" [--path P]"
 
   if [[ "$managed" == "devkit" ]]; then
-    [[ -n "$path" ]] || die "missing --path"
+    # Default path to current directory — so you can register from inside the project
+    [[ -z "$path" ]] && path="$PWD"
     [[ -n "$port" ]] || die "missing --port"
     [[ -n "$cmd"  ]] || die "missing --cmd"
     path="$(cd "$path" 2>/dev/null && pwd)" || die "path does not exist: $path"
-    if ! grep -q -- "$port" <<<"$cmd"; then
-      echo "devkit: warning — startCmd does not reference port $port. If the app reads the port from config, that may be fine; otherwise the app can drift from its registered URL." >&2
-    fi
   fi
 
   [[ -z "$claude" && -n "$path" ]] && claude=$(detect_claude_md "$path" || true)
@@ -503,10 +507,13 @@ cmd_reload() {
   if [[ $code -eq 0 ]]; then
     echo "reloaded Caddy"
   else
-    echo "devkit: Caddy reload failed — is it running? (sudo brew services start caddy)" >&2
-    [[ -n "$out" ]] && echo "$out" >&2
-    return 1
+    # Warn but do NOT fail — registry + Caddyfile are already written correctly.
+    # Caddy may not be running yet (first-time setup), or the user manages it separately.
+    echo "devkit: warning — Caddy not reloaded (is it running?)" >&2
+    echo "  Run: sudo brew services start caddy" >&2
+    [[ -n "$out" ]] && echo "  $out" >&2
   fi
+  return 0
 }
 
 cmd_bootstrap() {
@@ -606,7 +613,7 @@ cmd_help() {
 devkit — local app registry, hostname proxy, process manager, dashboard
 
 Registry:
-  devkit register --name N --path P --port N --cmd "C" [--repo URL] [--desc "..."]
+  devkit register <name> --port N --cmd "C" [--path P] [--repo URL] [--desc "..."]
                               [--managed-by devkit|external]
   devkit rename <old> <new>
   devkit remove <name>
