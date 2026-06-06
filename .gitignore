@@ -1,12 +1,19 @@
-# local registry state
+# local registry state (machine-specific, never commit)
 apps.json
 
-# generated from apps.json
+# generated from apps.json (rebuilt on `devkit reload`)
 Caddyfile
 dashboard.html
+
+# runtime dirs
+pids/
+logs/
+
+# macOS
 .DS_Store
 
 # internal planning — lives in devkit-internal repo
+MenuBarApp/devkit-internal/
 LAUNCH.md
 RELEASE_PLAN.md
 IDEAS.md

@@ -56,9 +56,9 @@ Add this to `~/.claude/CLAUDE.md` and Claude will register every new app automat
 ```markdown
 ## Local Web Apps — devkit
 When building any local web app, register it with devkit:
-  devkit register --name <slug> --path <abs-path> --port <port> --cmd "<start-cmd>"
+  devkit register <slug> --port <port> --cmd "<start-cmd>"
   devkit start <slug>
-Apps are then reachable at http://<slug>.localhost:8080
+Apps are then reachable at http://<slug>.localhost
 ```
 
 The install script offers to add this for you. If you used Homebrew, paste it manually.
@@ -68,14 +68,13 @@ The install script offers to add this for you. If you used Homebrew, paste it ma
 ## Register an app yourself
 
 ```bash
-devkit register \
-  --name notes \
-  --path ~/code/notes \
-  --port 4010 \
-  --cmd "npm run dev -- --port 4010"
-
+# From inside your project directory:
+devkit register notes --port 4010 --cmd "npm run dev -- --port 4010"
 devkit start notes
-# → http://notes.localhost:8080
+# → http://notes.localhost
+
+# Or specify a path explicitly:
+devkit register notes --path ~/code/notes --port 4010 --cmd "npm run dev -- --port 4010"
 ```
 
 devkit auto-detects the git remote and any `CLAUDE.md` in the project.
@@ -95,15 +94,15 @@ devkit auto-detects the git remote and any `CLAUDE.md` in the project.
 | `devkit logs <name>` | Tail logs |
 | `devkit show <name>` | Print full app metadata |
 
-Or open `http://dash.localhost:8080` — the dashboard shows live status for every app.
+Or open `http://dash.localhost` — the dashboard shows live status for every app.
 
 ---
 
 ## Requirements
 
-macOS, [Homebrew](https://brew.sh), `jq`, `caddy`, `pm2`
+macOS 13+, [Homebrew](https://brew.sh), `jq`, `caddy`
 
-The install script handles all of these. For Homebrew installs, `npm install -g pm2` is the only manual step.
+The install script handles all of these automatically.
 
 ---
 
