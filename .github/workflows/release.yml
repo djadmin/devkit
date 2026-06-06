@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-mac-app:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: MenuBarApp
+        run: xcodegen generate
+
+      - name: Build Release app
+        working-directory: MenuBarApp
+        run: |
+          xcodebuild \
+            -project DevkitBar.xcodeproj \
+            -scheme DevkitBar \
+            -configuration Release \
+            -derivedDataPath /tmp/DerivedData \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Package app
+        run: |
+          APP=/tmp/DerivedData/Build/Products/Release/DevkitBar.app
+          ZIP=/tmp/DevkitBar.zip
+          # Ad-hoc sign so macOS doesn't hard-block it
+          codesign --force --deep --sign - "$APP"
+          cd /tmp/DerivedData/Build/Products/Release
+          zip -r "$ZIP" DevkitBar.app
+          echo "SHA256=$(shasum -a 256 $ZIP | awk '{print $1}')" >> $GITHUB_ENV
+          echo "ZIP_PATH=$ZIP" >> $GITHUB_ENV
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/DevkitBar.zip
+          generate_release_notes: true
+
+      - name: Update Homebrew cask
+        env:
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          git clone https://x-access-token:${GITHUB_TOKEN}@github.com/djadmin/homebrew-tap.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          # Write Casks/devkit.rb
+          mkdir -p Casks
+          cat > Casks/devkit.rb <<CASK
+          cask "devkit" do
+            version "${TAG#v}"
+            sha256 "${SHA256}"
+            url "https://github.com/djadmin/devkit/releases/download/${TAG}/DevkitBar.zip"
+            name "DevkitBar"
+            desc "Menu bar app to manage all your local web apps"
+            homepage "https://github.com/djadmin/devkit"
+            depends_on formula: "djadmin/tap/devkit"
+            app "DevkitBar.app"
+            zap trash: [
+              "~/Library/Application Support/DevkitBar",
+              "~/Library/Preferences/com.devkit.menubar.plist",
+              "~/Library/Caches/com.devkit.menubar",
+            ]
+          end
+          CASK
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add Casks/devkit.rb
+          git commit -m "devkit ${TAG}"
+          git push

@@ -16,15 +16,21 @@ localhost:5173   →   api-tester.localhost
 
 ## Install
 
-**Option A — one-liner (recommended)**
+**Option A — CLI + Menu bar app (recommended)**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | bash
+brew tap djadmin/tap
+brew install --cask devkit
 ```
 
-Installs everything, starts Caddy, and offers to wire Claude in automatically.
+Installs the CLI and the macOS menu bar app in one shot. Then run:
 
-**Option B — Homebrew**
+```bash
+devkit bootstrap
+brew services start caddy
+```
+
+**Option B — CLI only (Homebrew)**
 
 ```bash
 brew tap djadmin/tap
@@ -32,6 +38,14 @@ brew install devkit
 ```
 
 Then run `devkit bootstrap` and `brew services start caddy` to finish.
+
+**Option C — one-liner**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | bash
+```
+
+Installs the CLI, starts Caddy, and offers to wire Claude in automatically. Build the menu bar app from source separately (see below).
 
 ---
 
@@ -97,12 +111,16 @@ The install script handles all of these. For Homebrew installs, `npm install -g 
 
 A native macOS menu bar app ships alongside the CLI. It shows live status for all your apps, lets you start/stop/open them without touching a terminal, and updates instantly when `apps.json` changes.
 
-```
-MenuBarApp/     ← SwiftUI app (macOS 13+)
-  setup.sh      ← installs xcodegen, generates .xcodeproj
+Install via Homebrew (see above) or build from source:
+
+```bash
+git clone https://github.com/djadmin/devkit
+cd devkit/MenuBarApp
+./setup.sh
+open DevkitBar.xcodeproj   # then ⌘R
 ```
 
-See [MenuBarApp/README.md](MenuBarApp/README.md) for build and usage instructions.
+See [MenuBarApp/README.md](MenuBarApp/README.md) for full details.
 
 ---
 
@@ -138,6 +156,28 @@ curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | ba
 cp ~/apps_backup.json ~/devkit/apps.json
 devkit reload
 devkit start-all
+```
+
+---
+
+## Releasing (maintainers)
+
+Cut a release by tagging — GitHub Actions builds the Mac app and updates the cask automatically:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+The workflow (`release.yml`) will:
+1. Build `DevkitBar.app` on a macOS runner
+2. Zip and upload it to the GitHub Release
+3. Update `Casks/devkit.rb` in `djadmin/homebrew-tap` with the new SHA256
+
+**First-time setup:** add a `HOMEBREW_TAP_GITHUB_TOKEN` secret to this repo with a GitHub token that has write access to `djadmin/homebrew-tap`:
+
+```bash
+gh auth token | gh secret set HOMEBREW_TAP_GITHUB_TOKEN --repo djadmin/devkit --body -
 ```
 
 ---

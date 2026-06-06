@@ -41,7 +41,8 @@ No config per project. No remembering ports. No terminal tab soup.
 ### 1. Install
 
 ```bash
-# via Homebrew (coming soon)
+# via Homebrew (installs CLI + Mac app)
+brew tap djadmin/tap
 brew install --cask devkit
 
 # or build from source
