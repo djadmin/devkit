@@ -93,6 +93,19 @@ The install script handles all of these. For Homebrew installs, `npm install -g 
 
 ---
 
+## Menu bar app
+
+A native macOS menu bar app ships alongside the CLI. It shows live status for all your apps, lets you start/stop/open them without touching a terminal, and updates instantly when `apps.json` changes.
+
+```
+MenuBarApp/     ← SwiftUI app (macOS 13+)
+  setup.sh      ← installs xcodegen, generates .xcodeproj
+```
+
+See [MenuBarApp/README.md](MenuBarApp/README.md) for build and usage instructions.
+
+---
+
 ## How state works
 
 ```
@@ -102,7 +115,30 @@ Caddyfile          ← generated, gitignored
 dashboard.html     ← generated, gitignored
 ```
 
-Set `DEVKIT_HOME` to store the registry somewhere other than the repo root.
+`DEVKIT_HOME` controls where devkit looks for `apps.json`. It defaults to the directory where devkit is installed. Set it to a custom path to keep your registry elsewhere:
+
+```bash
+export DEVKIT_HOME=~/my-registry   # add to ~/.zshrc
+```
+
+---
+
+## Migrating or reinstalling
+
+If you're doing a fresh install and want to keep your existing apps:
+
+```bash
+# 1. Back up before reinstalling
+cp "$DEVKIT_HOME/apps.json" ~/apps_backup.json
+
+# 2. Install fresh
+curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | bash
+
+# 3. Restore your registry
+cp ~/apps_backup.json ~/devkit/apps.json
+devkit reload
+devkit start-all
+```
 
 ---
 
