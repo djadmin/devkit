@@ -1,0 +1,31 @@
+name: DevkitBar
+options:
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "16"
+  createIntermediateGroups: true
+  bundleIdPrefix: com.devkit
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+
+targets:
+  DevkitBar:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: DevkitBar
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.devkit.menubar
+        INFOPLIST_FILE: DevkitBar/Info.plist
+        CODE_SIGN_ENTITLEMENTS: DevkitBar/DevkitBar.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        PRODUCT_NAME: DevkitBar

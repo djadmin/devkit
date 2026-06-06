@@ -1,0 +1,59 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcodeproj/*.xcworkspace/
+*.xcworkspace/
+DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-to-trash
+*.xcuserstate
+
+# Build output
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods (not used, but just in case)
+Pods/
+Podfile.lock
+
+# Carthage (not used)
+Carthage/
+
+# Generated project (xcodegen output — regenerate with ./setup.sh)
+DevkitBar.xcodeproj/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Internal planning (goes in devkit-internal private repo)
+devkit-internal/
+
+# Tweet/marketing assets (working files)
+devkit-tweet-card.html
+
+# Python image generation outputs
+*.pyc
+__pycache__/
