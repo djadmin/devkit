@@ -307,7 +307,7 @@ assert_eq "pid file tracks listener pid" "$listener_pid" "$pid_file_value"
 
 out=$("$DEVKIT" list 2>&1 || true)
 assert_contains "list shows lifecycle app running" "lifecycle-app      5097" "$out"
-line=$(printf '%s\n' "$out" | rg '^lifecycle-app\s+5097\s+' || true)
+line=$(printf '%s\n' "$out" | grep -E '^lifecycle-app[[:space:]]+5097[[:space:]]+' || true)
 assert_contains "list marks lifecycle app running" "running" "$line"
 
 out=$("$DEVKIT" stop lifecycle-app 2>&1 || true)
@@ -391,7 +391,7 @@ assert_eq "start fails for crashing app" "1" "$code"
 assert_contains "crash start reports bind failure" "failed to bind port 5094" "$out"
 assert_eq "crash app pid file cleaned up" "false" "$( [[ -f "$TMP_HOME/pids/crash-app.pid" ]] && echo true || echo false )"
 out=$("$DEVKIT" list 2>&1 || true)
-line=$(printf '%s\n' "$out" | rg '^crash-app\s+5094\s+' || true)
+line=$(printf '%s\n' "$out" | grep -E '^crash-app[[:space:]]+5094[[:space:]]+' || true)
 assert_contains "crash app shows stopped after failed start" "stopped" "$line"
 
 # -- unknown command --

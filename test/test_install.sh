@@ -134,7 +134,7 @@ listener_pid=$(wait_for_port_state 5093 listening 60 || true)
 assert_eq "pid file matches listener after install" "$listener_pid" "$(cat "$HOME_DIR/devkit/pids/smoke.pid")"
 
 out=$(HOME="$HOME_DIR" DEVKIT_HOME="$HOME_DIR/devkit" "$DEVKIT_BIN" list 2>&1 || true)
-line=$(printf '%s\n' "$out" | rg '^smoke\s+5093\s+' || true)
+line=$(printf '%s\n' "$out" | grep -E '^smoke[[:space:]]+5093[[:space:]]+' || true)
 assert_contains "list shows smoke running after install" "running" "$line"
 
 out=$(HOME="$HOME_DIR" DEVKIT_HOME="$HOME_DIR/devkit" "$DEVKIT_BIN" stop smoke 2>&1 || true)
