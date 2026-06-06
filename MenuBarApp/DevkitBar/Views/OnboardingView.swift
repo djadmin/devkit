@@ -122,10 +122,14 @@ private struct FoundPortsView: View {
 
     private func track(port: Int) async {
         let name = names[port]?.trimmingCharacters(in: .whitespaces)
-        let slug = (name?.isEmpty == false ? name! : "app-\(port)")
+        let raw = (name?.isEmpty == false ? name! : "app-\(port)")
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
-        await DevkitCLI.run("register \(slug) --port \(port) --managed-by external")
+        // Strip anything that isn't alphanumeric or hyphen to prevent flag injection
+        let slug = raw.replacingOccurrences(of: #"[^a-z0-9\-]"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let safeName = slug.isEmpty ? "app-\(port)" : slug
+        await DevkitCLI.run("register \(safeName) --port \(port) --managed-by external")
         tracked.insert(port)
         registry.reload()
     }
