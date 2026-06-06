@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# devkit — local app registry, hostname proxy, pm2 wrapper, dashboard.
+# devkit — local app registry, hostname proxy, process manager, dashboard.
 # Source of truth: $DEVKIT_HOME/apps.json
 # Generates:       $DEVKIT_HOME/Caddyfile, $DEVKIT_HOME/dashboard.html
 
 set -euo pipefail
 
-DEVKIT_VERSION="0.1.0"
+DEVKIT_VERSION="0.2.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -13,6 +13,8 @@ DEVKIT_HOME="${DEVKIT_HOME:-$REPO_HOME}"
 APPS_JSON="$DEVKIT_HOME/apps.json"
 CADDYFILE="$DEVKIT_HOME/Caddyfile"
 DASHBOARD="$DEVKIT_HOME/dashboard.html"
+PIDS_DIR="$DEVKIT_HOME/pids"
+LOGS_DIR="$DEVKIT_HOME/logs"
 BREW_CADDYFILE="/opt/homebrew/etc/Caddyfile"
 
 die() { echo "devkit: $*" >&2; exit 1; }
@@ -21,18 +23,22 @@ need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
 need jq
 
 ensure_registry_dir() {
-  mkdir -p "$DEVKIT_HOME"
+  mkdir -p "$DEVKIT_HOME" "$PIDS_DIR" "$LOGS_DIR"
 }
 
 ensure_registry() {
   ensure_registry_dir
   if [[ ! -f "$APPS_JSON" ]]; then
-    echo '{"version":1,"proxyPort":8080,"tld":"localhost","dashboardHost":"dash","apps":[]}' > "$APPS_JSON"
+    echo '{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[]}' > "$APPS_JSON"
   fi
+  # Migrate legacy managedBy=pm2 → devkit
+  local tmp; tmp=$(mktemp)
+  jq '.apps |= map(if .managedBy == "pm2" then .managedBy = "devkit" else . end)' "$APPS_JSON" > "$tmp"
+  mv "$tmp" "$APPS_JSON"
 }
 
 cfg() { jq -r "$1" "$APPS_JSON"; }
-proxy_port()    { cfg '.proxyPort // 8080'; }
+proxy_port()    { cfg '.proxyPort // 80'; }
 tld()           { cfg '.tld // "localhost"'; }
 dash_host()     { cfg '.dashboardHost // "dash"'; }
 
@@ -67,10 +73,21 @@ assert_unique() {
   fi
 }
 
+pid_file() { echo "$PIDS_DIR/$1.pid"; }
+log_file() { echo "$LOGS_DIR/$1.log"; }
+
+is_running() {
+  local name="$1"
+  local pf; pf=$(pid_file "$name")
+  [[ -f "$pf" ]] || return 1
+  local pid; pid=$(cat "$pf")
+  kill -0 "$pid" 2>/dev/null
+}
+
 # ---------- commands ----------
 
 cmd_register() {
-  local name="" path="" port="" cmd="" claude="" repo="" desc="" managed="pm2"
+  local name="" path="" port="" cmd="" claude="" repo="" desc="" managed="devkit"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name)       name="$2";    shift 2 ;;
@@ -87,8 +104,8 @@ cmd_register() {
 
   [[ -n "$name" ]] || die "missing --name"
 
-  if [[ "$managed" == "pm2" ]]; then
-    [[ -n "$path" ]] || die "missing --path (required for managedBy=pm2)"
+  if [[ "$managed" == "devkit" ]]; then
+    [[ -n "$path" ]] || die "missing --path"
     [[ -n "$port" ]] || die "missing --port"
     [[ -n "$cmd"  ]] || die "missing --cmd"
     path="$(cd "$path" 2>/dev/null && pwd)" || die "path does not exist: $path"
@@ -104,8 +121,7 @@ cmd_register() {
   assert_unique "$name" "${port:-0}" "$hostname"
 
   ensure_registry
-  local tmp
-  tmp=$(mktemp)
+  local tmp; tmp=$(mktemp)
   jq --arg n "$name" --arg p "$path" --arg c "${claude:-}" \
      --arg cmd "${cmd:-}" --argjson port "${port:-0}" --arg h "$hostname" \
      --arg repo "${repo:-}" --arg desc "$desc" --arg m "$managed" \
@@ -136,22 +152,17 @@ cmd_rename() {
     die "name already taken: $new"
   fi
 
-  local was_online="false" managed
-  managed=$(jq -r --arg n "$old" '.apps[] | select(.name==$n) | .managedBy' "$APPS_JSON")
-  if [[ "$managed" == "pm2" ]] && command -v pm2 >/dev/null 2>&1 && pm2 describe "$old" >/dev/null 2>&1; then
-    local raw
-    raw=$(pm2 jlist 2>/dev/null | grep -E '^\[' | head -1 || true)
-    if [[ -n "$raw" ]] && jq -e . <<<"$raw" >/dev/null 2>&1; then
-      local s
-      s=$(jq -r --arg n "$old" '[.[] | select(.name==$n)][0].pm2_env.status // ""' <<<"$raw")
-      [[ "$s" == "online" ]] && was_online="true"
-    fi
-    pm2 delete "$old" >/dev/null 2>&1 || true
+  local was_running=false
+  if is_running "$old"; then
+    was_running=true
+    _stop_by_name "$old"
   fi
+  # Move PID/log files to new name
+  [[ -f "$(pid_file "$old")" ]] && mv "$(pid_file "$old")" "$(pid_file "$new")" 2>/dev/null || true
+  [[ -f "$(log_file "$old")" ]] && mv "$(log_file "$old")" "$(log_file "$new")" 2>/dev/null || true
 
   local new_host="$new.$(tld)"
-  local tmp
-  tmp=$(mktemp)
+  local tmp; tmp=$(mktemp)
   jq --arg old "$old" --arg new "$new" --arg h "$new_host" \
     '.apps |= map(if .name == $old then .name = $new | .hostname = $h else . end)' \
     "$APPS_JSON" > "$tmp"
@@ -160,7 +171,7 @@ cmd_rename() {
   echo "renamed $old → $new (now at $(url_for "$new_host"))"
   cmd_reload
 
-  if [[ "$was_online" == "true" ]]; then
+  if [[ "$was_running" == true ]]; then
     cmd_start "$new"
   fi
 }
@@ -169,31 +180,24 @@ cmd_remove() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit remove <name>"
   ensure_registry
-  local tmp
-  tmp=$(mktemp)
+  if is_running "$name"; then
+    _stop_by_name "$name"
+  fi
+  rm -f "$(pid_file "$name")" "$(log_file "$name")"
+  local tmp; tmp=$(mktemp)
   jq --arg n "$name" '.apps |= map(select(.name != $n))' "$APPS_JSON" > "$tmp"
   mv "$tmp" "$APPS_JSON"
-  command -v pm2 >/dev/null && pm2 delete "$name" >/dev/null 2>&1 || true
-  command -v pm2 >/dev/null && pm2 save >/dev/null 2>&1 || true
   echo "removed $name"
   cmd_reload
 }
 
 cmd_list() {
   ensure_registry
-  local pm2_states="[]"
-  if command -v pm2 >/dev/null 2>&1; then
-    local raw
-    raw=$(pm2 jlist 2>/dev/null | grep -E '^\[' | head -1 || true)
-    if [[ -n "$raw" ]] && jq -e . <<<"$raw" >/dev/null 2>&1; then
-      pm2_states="$raw"
-    fi
-  fi
   printf "%-18s %-7s %-32s %-9s %s\n" NAME PORT URL STATE PATH
   while IFS=$'\t' read -r name port hostname path managed; do
-    local state="-"
-    if [[ "$managed" == "pm2" ]]; then
-      state=$(jq -r --arg n "$name" '[.[] | select(.name==$n)][0].pm2_env.status // "stopped"' <<<"$pm2_states")
+    local state="stopped"
+    if [[ "$managed" == "devkit" ]]; then
+      is_running "$name" && state="running" || state="stopped"
     elif [[ "$managed" == "external" ]]; then
       state="external"
     fi
@@ -208,12 +212,142 @@ cmd_show() {
   jq --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON"
 }
 
+# ---------- process management ----------
+
+# Recursively kill a process and all its children (depth-first, SIGTERM then SIGKILL).
+_kill_tree() {
+  local pid=$1 sig=${2:-TERM}
+  local children; children=$(pgrep -P "$pid" 2>/dev/null || true)
+  for child in $children; do
+    _kill_tree "$child" "$sig"
+  done
+  kill "-$sig" "$pid" 2>/dev/null || true
+}
+
+_stop_by_name() {
+  local name="$1"
+  local pf; pf=$(pid_file "$name")
+  [[ -f "$pf" ]] || return 0
+  local pid; pid=$(cat "$pf")
+  if kill -0 "$pid" 2>/dev/null; then
+    _kill_tree "$pid" TERM
+    local i=0
+    while kill -0 "$pid" 2>/dev/null && (( i < 20 )); do
+      sleep 0.1; (( i++ ))
+    done
+    _kill_tree "$pid" KILL 2>/dev/null || true
+  fi
+  rm -f "$pf"
+}
+
+cmd_start() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit start <name>"
+  ensure_registry
+
+  local managed
+  managed=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .managedBy' "$APPS_JSON")
+  [[ -n "$managed" ]] || die "unknown app: $name"
+  [[ "$managed" == "devkit" ]] || die "$name is managed-by=$managed — devkit does not control its lifecycle"
+
+  local path cmd port
+  path=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .path' "$APPS_JSON")
+  cmd=$(jq -r  --arg n "$name" '.apps[] | select(.name==$n) | .startCmd' "$APPS_JSON")
+  port=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .port' "$APPS_JSON")
+
+  if [[ -z "$path" || ! -d "$path" ]]; then
+    echo "devkit: $name — path missing or not a directory: $path" >&2; return 1
+  fi
+  if [[ -z "$cmd" || "$cmd" == "null" ]]; then
+    echo "devkit: $name — no startCmd registered" >&2; return 1
+  fi
+
+  local pf lf; pf=$(pid_file "$name"); lf=$(log_file "$name")
+
+  # Stop any existing tracked process before starting a new one
+  _stop_by_name "$name"
+
+  # Pass cmd via env var to avoid quoting issues (handles PORT=X cmd, spaces, etc.).
+  # bash writes its own PID ($$) before running the command; bash stays alive while
+  # the app runs so kill -0 on this PID reliably reflects whether the app is up.
+  ( cd "$path" && DEVKIT_CMD="$cmd" DEVKIT_PF="$pf" \
+      nohup bash -c 'echo $$ > "$DEVKIT_PF"; eval "$DEVKIT_CMD"' \
+      >> "$lf" 2>&1 & )
+
+  sleep 0.6
+  local pid; pid=$(cat "$pf" 2>/dev/null || echo "")
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    echo "devkit: $name failed to start — check logs: devkit logs $name" >&2
+    return 1
+  fi
+
+  echo "started $name (pid $pid) → $(url_for "$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .hostname' "$APPS_JSON")")"
+}
+
+cmd_stop() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit stop <name>"
+  ensure_registry
+  is_running "$name" || { echo "devkit: $name is not running"; return 0; }
+  _stop_by_name "$name"
+  echo "stopped $name"
+}
+
+cmd_restart() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit restart <name>"
+  cmd_stop "$name"
+  cmd_start "$name"
+}
+
+cmd_logs() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit logs <name>"
+  local lf; lf=$(log_file "$name")
+  [[ -f "$lf" ]] || die "no logs yet for $name (has it been started?)"
+  tail -f "$lf"
+}
+
+cmd_start_all() {
+  ensure_registry
+  local started=0 failed=0
+  while IFS= read -r name; do
+    if cmd_start "$name"; then
+      (( started++ ))
+    else
+      (( failed++ )) || true
+    fi
+  done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
+  local msg="started $started app(s)"
+  (( failed > 0 )) && msg="$msg, $failed failed" || true
+  echo "$msg"
+}
+
+cmd_stop_all() {
+  ensure_registry
+  local stopped=0
+  while IFS= read -r name; do
+    if is_running "$name"; then
+      _stop_by_name "$name"
+      echo "stopped $name"
+      (( stopped++ ))
+    fi
+  done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
+  echo "stopped $stopped app(s)"
+}
+
+cmd_restart_all() {
+  ensure_registry
+  while IFS= read -r name; do
+    cmd_restart "$name" || true
+  done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
+}
+
 # ---------- generation ----------
 
 render_caddyfile() {
   ensure_registry
-  local pp
-  pp=$(proxy_port)
+  local pp; pp=$(proxy_port)
   local listen=""
   [[ "$pp" != "80" ]] && listen=":$pp"
 
@@ -244,8 +378,7 @@ render_dashboard() {
   local rows=""
   local link_attrs='target="_blank" rel="noopener"'
   while IFS=$'\t' read -r name hostname port managed path repo claude; do
-    local url
-    url=$(url_for "$hostname")
+    local url; url=$(url_for "$hostname")
     local repo_cell="—"
     [[ -n "$repo" && "$repo" != "null" ]] && repo_cell="<a href=\"$repo\" $link_attrs>repo</a>"
     local claude_cell="—"
@@ -330,7 +463,6 @@ document.querySelectorAll('code.copy').forEach(c => {
     setTimeout(() => c.textContent = orig, 800);
   });
 });
-// Live status check — probe each app's localhost port
 function checkStatus() {
   document.querySelectorAll('tr[data-port]').forEach(row => {
     const port = row.dataset.port;
@@ -358,9 +490,6 @@ HTML
 
 caddy_admin_reload() {
   command -v caddy >/dev/null 2>&1 || return 1
-  # Guard: only reload the live Caddy instance when running from the real
-  # DEVKIT_HOME. If BREW_CADDYFILE doesn't symlink to our Caddyfile (e.g.
-  # running in a test temp dir), skip — otherwise we'd corrupt the live proxy.
   local linked; linked=$(readlink "$BREW_CADDYFILE" 2>/dev/null || true)
   [[ "$linked" == "$CADDYFILE" ]] || return 0
   caddy reload --config "$CADDYFILE" --address localhost:2019
@@ -401,73 +530,8 @@ cmd_bootstrap() {
   echo
   echo "next steps (one-time):"
   echo "  sudo brew services start caddy"
-  echo "  pm2 startup"
-  echo "  pm2 save"
   echo
   echo "then visit: $(url_for "$(dash_host).$(tld)")"
-}
-
-# ---------- pm2 wrappers ----------
-
-resolve_pm2_app() {
-  local name="$1"
-  ensure_registry
-  local managed
-  managed=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .managedBy' "$APPS_JSON")
-  [[ -n "$managed" ]] || die "unknown app: $name"
-  [[ "$managed" == "pm2" ]] || die "$name is managedBy=$managed — devkit does not control its lifecycle"
-}
-
-cmd_start() {
-  local name="${1:-}"
-  [[ -n "$name" ]] || die "usage: devkit start <name>"
-  need pm2
-  resolve_pm2_app "$name"
-  local path cmd
-  path=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .path' "$APPS_JSON")
-  cmd=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .startCmd' "$APPS_JSON")
-
-  if pm2 describe "$name" >/dev/null 2>&1; then
-    pm2 restart "$name" >/dev/null
-  else
-    pm2 start "$cmd" --name "$name" --cwd "$path"
-  fi
-  pm2 save >/dev/null
-  echo "started $name"
-}
-
-cmd_stop()    { need pm2; pm2 stop "$1" >/dev/null && pm2 save >/dev/null && echo "stopped $1"; }
-cmd_restart() { need pm2; pm2 restart "$1"; }
-cmd_logs()    { need pm2; pm2 logs "$1"; }
-
-cmd_start_all() {
-  ensure_registry
-  local started=0
-  while IFS= read -r name; do
-    cmd_start "$name" && ((started++)) || true
-  done < <(jq -r '.apps[] | select(.managedBy=="pm2") | .name' "$APPS_JSON")
-  echo "started $started app(s)"
-}
-
-cmd_stop_all() {
-  ensure_registry
-  need pm2
-  local stopped=0
-  while IFS= read -r name; do
-    pm2 stop "$name" >/dev/null 2>&1 && ((stopped++)) || true
-  done < <(jq -r '.apps[] | select(.managedBy=="pm2") | .name' "$APPS_JSON")
-  pm2 save >/dev/null 2>&1
-  echo "stopped $stopped app(s)"
-}
-
-cmd_restart_all() {
-  ensure_registry
-  need pm2
-  local restarted=0
-  while IFS= read -r name; do
-    cmd_start "$name" && ((restarted++)) || true
-  done < <(jq -r '.apps[] | select(.managedBy=="pm2") | .name' "$APPS_JSON")
-  echo "restarted $restarted app(s)"
 }
 
 # ---------- editor / browser ----------
@@ -495,7 +559,7 @@ cmd_edit() {
     exec claude
   else
     echo "cd $path"
-    echo "claude not found in PATH. cd'd into the project and opened a shell."
+    echo "claude not found in PATH — opening shell"
     exec "${SHELL:-/bin/zsh}"
   fi
 }
@@ -530,6 +594,8 @@ DEVKIT_HOME=$DEVKIT_HOME
 APPS_JSON=$APPS_JSON
 CADDYFILE=$CADDYFILE
 DASHBOARD=$DASHBOARD
+PIDS_DIR=$PIDS_DIR
+LOGS_DIR=$LOGS_DIR
 OUT
 }
 
@@ -537,20 +603,22 @@ OUT
 
 cmd_help() {
   cat <<'OUT'
-devkit — local app registry, hostname proxy, dashboard, pm2 wrapper
+devkit — local app registry, hostname proxy, process manager, dashboard
 
-Lifecycle:
-  devkit register --name N --path P --port N --cmd "C" [--repo URL] [--claude PATH]
-                              [--desc "..."] [--managed-by pm2|external]
+Registry:
+  devkit register --name N --path P --port N --cmd "C" [--repo URL] [--desc "..."]
+                              [--managed-by devkit|external]
   devkit rename <old> <new>
   devkit remove <name>
   devkit list
   devkit show <name>
 
-Process (pm2):
+Process:
   devkit start <name>
-  devkit stop|restart|logs <name>
-  devkit start-all|stop-all|restart-all
+  devkit stop <name>
+  devkit restart <name>
+  devkit logs <name>
+  devkit start-all | stop-all | restart-all
 
 Browser / editor:
   devkit open <name>
@@ -564,19 +632,20 @@ Sync / portability:
 
 Internals:
   devkit reload
+  devkit version
 OUT
 }
 
 cmd_version() { echo "devkit $DEVKIT_VERSION"; }
 
 case "${1:-help}" in
-  register)   shift; cmd_register "$@" ;;
-  rename)     shift; cmd_rename "$@" ;;
-  remove)     shift; cmd_remove "$@" ;;
-  list)       cmd_list ;;
-  show)       shift; cmd_show "$@" ;;
-  reload)     cmd_reload ;;
-  bootstrap)  cmd_bootstrap ;;
+  register)    shift; cmd_register "$@" ;;
+  rename)      shift; cmd_rename "$@" ;;
+  remove)      shift; cmd_remove "$@" ;;
+  list)        cmd_list ;;
+  show)        shift; cmd_show "$@" ;;
+  reload)      cmd_reload ;;
+  bootstrap)   cmd_bootstrap ;;
   start)       shift; cmd_start "$@" ;;
   stop)        shift; cmd_stop "$@" ;;
   restart)     shift; cmd_restart "$@" ;;
@@ -584,11 +653,11 @@ case "${1:-help}" in
   stop-all)    cmd_stop_all ;;
   restart-all) cmd_restart_all ;;
   logs)        shift; cmd_logs "$@" ;;
-  open)       shift; cmd_open "$@" ;;
-  edit)       shift; cmd_edit "$@" ;;
-  clone)      shift; cmd_clone "$@" ;;
-  clone-all)  cmd_clone_all ;;
-  paths)      cmd_paths ;;
+  open)        shift; cmd_open "$@" ;;
+  edit)        shift; cmd_edit "$@" ;;
+  clone)       shift; cmd_clone "$@" ;;
+  clone-all)   cmd_clone_all ;;
+  paths)       cmd_paths ;;
   version|--version|-v) cmd_version ;;
   help|--help|-h) cmd_help ;;
   *) echo "devkit: unknown command: $1" >&2; cmd_help; exit 2 ;;
