@@ -34,7 +34,7 @@ final class AppRegistry: ObservableObject {
         if let path = await DevkitCLI.appsJSONPath() {
             appsJSONPath = path
         } else {
-            let fallback = NSHomeDirectory() + "/djadmin/devkit/apps.json"
+            let fallback = NSHomeDirectory() + "/devkit/apps.json"
             if FileManager.default.fileExists(atPath: fallback) {
                 appsJSONPath = fallback
             } else {

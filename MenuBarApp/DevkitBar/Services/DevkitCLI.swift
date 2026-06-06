@@ -7,7 +7,7 @@ enum DevkitCLI {
             "/opt/homebrew/bin/devkit",
             "/usr/local/bin/devkit",
             NSHomeDirectory() + "/.local/bin/devkit",
-            NSHomeDirectory() + "/djadmin/devkit/bin/devkit",
+            NSHomeDirectory() + "/devkit/bin/devkit",
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }()
