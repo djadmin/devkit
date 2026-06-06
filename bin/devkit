@@ -110,6 +110,8 @@ cmd_register() {
 
   [[ -n "$name" ]] || die "usage: devkit register <name> --port N --cmd \"CMD\" [--path P]"
 
+  ensure_registry
+
   if [[ "$managed" == "devkit" ]]; then
     # Default path to current directory — so you can register from inside the project
     [[ -z "$path" ]] && path="$PWD"
@@ -234,12 +236,14 @@ _stop_by_name() {
   [[ -f "$pf" ]] || return 0
   local pid; pid=$(cat "$pf")
   if kill -0 "$pid" 2>/dev/null; then
-    _kill_tree "$pid" TERM
-    local i=0
-    while kill -0 "$pid" 2>/dev/null && (( i < 20 )); do
-      sleep 0.1; (( i++ ))
-    done
-    _kill_tree "$pid" KILL 2>/dev/null || true
+    { _kill_tree "$pid" TERM
+      local i=0
+      while kill -0 "$pid" 2>/dev/null && (( i < 20 )); do
+        sleep 0.1; (( i++ ))
+      done
+      _kill_tree "$pid" KILL 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    } 2>/dev/null
   fi
   rm -f "$pf"
 }
@@ -271,12 +275,20 @@ cmd_start() {
   # Stop any existing tracked process before starting a new one
   _stop_by_name "$name"
 
-  # Pass cmd via env var to avoid quoting issues (handles PORT=X cmd, spaces, etc.).
-  # bash writes its own PID ($$) before running the command; bash stays alive while
-  # the app runs so kill -0 on this PID reliably reflects whether the app is up.
-  ( cd "$path" && DEVKIT_CMD="$cmd" DEVKIT_PF="$pf" \
-      nohup bash -c 'echo $$ > "$DEVKIT_PF"; eval "$DEVKIT_CMD"' \
-      >> "$lf" 2>&1 & )
+  # Double-fork via Perl to detach from the calling shell's process group.
+  # This prevents the parent shell from printing "Terminated" when we kill the process.
+  # The inner bash writes its own PID ($$) so the pidfile always holds the right PID.
+  ( cd "$path" && DEVKIT_CMD="$cmd" DEVKIT_PF="$pf" DEVKIT_LOG="$lf" \
+    perl -e '
+      use POSIX qw(setsid);
+      fork() && exit(0);
+      setsid();
+      fork() && exit(0);
+      open STDIN,  "<",  "/dev/null";
+      open STDOUT, ">>", $ENV{DEVKIT_LOG} or die;
+      open STDERR, ">&STDOUT";
+      exec "/bin/bash", "-c", q(echo $$ > "$DEVKIT_PF"; eval "$DEVKIT_CMD");
+    ' )
 
   sleep 0.6
   local pid; pid=$(cat "$pf" 2>/dev/null || echo "")
