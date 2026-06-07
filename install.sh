@@ -110,8 +110,10 @@ ok "devkit bootstrapped"
 step "Starting Caddy..."
 if [[ "$DEVKIT_SKIP_BREW_SERVICES" == "1" ]]; then
   warn "Skipping brew services start (DEVKIT_SKIP_BREW_SERVICES=1)"
-elif brew services list | grep -q "caddy.*started"; then
+elif curl -sf http://localhost:2019/config/ >/dev/null 2>&1; then
   ok "Caddy already running"
+elif brew services list | grep -q "caddy.*started"; then
+  ok "Caddy already running (brew services)"
 else
   brew services start caddy
   ok "Caddy started"
