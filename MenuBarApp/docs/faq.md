@@ -113,7 +113,7 @@ The scanner checks a fixed list of common dev ports. If your app is on an unusua
 devkit register my-api --port 9876 --managed-by external
 ```
 
-Or run `devkit start-all` scanning mode is only for onboarding — day-to-day you manage apps directly.
+You can also type the port number directly into the **add port…** field at the bottom of the onboarding screen — it checks whether something is actually listening before adding it to the list. Scanning is only run during onboarding; day-to-day, manage apps directly.
 
 ### Can I use devkit with Docker containers?
 
@@ -252,11 +252,10 @@ devkit logs my-app
 ### How do I rename an app?
 
 ```bash
-devkit register new-name --port <same-port> --cmd "<same-cmd>" --path <same-path>
-devkit remove old-name
+devkit rename old-name new-name
 ```
 
-There is no `devkit rename` command. Re-registering and removing is the current path.
+This safely stops the app if it is running, updates the registry entry, refreshes the `.localhost` routing, and restarts it if it was running before.
 
 ### How do I remove an app from the registry?
 

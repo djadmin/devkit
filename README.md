@@ -120,7 +120,7 @@ For devkit-managed apps, the CLI now uses both **PID state and port ownership** 
 
 Release confidence is backed by automated macOS checks:
 
-- `62` CLI lifecycle tests
+- `67` CLI lifecycle tests
 - `16` installer smoke tests
 - GitHub Actions on fresh macOS runners for CLI and installer paths
 

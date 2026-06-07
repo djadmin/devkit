@@ -12,7 +12,6 @@
     <img src="https://img.shields.io/badge/agent--first-Claude%20%7C%20Cursor%20%7C%20Codex-6366f1?style=flat-square" alt="Agent first" />
   </p>
 
-  <img src="docs/assets/screenshot.png" alt="devkit menu bar screenshot" width="360" />
 </div>
 
 ---

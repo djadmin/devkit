@@ -350,18 +350,92 @@ private struct PortRow: View {
     }
 }
 
-// MARK: – Claude setup card
+// MARK: – Agent setup card
+
+private struct AgentConfig {
+    let name: String
+    let icon: String
+    let configFile: String
+    let snippet: String
+    let step2: String
+}
+
+private let agentConfigs: [AgentConfig] = [
+    AgentConfig(
+        name: "Claude",
+        icon: "c.circle.fill",
+        configFile: "~/.claude/CLAUDE.md",
+        snippet: """
+        ## Local Web Apps — devkit
+        After creating any local web app or service:
+          devkit register <slug> --port <port> --cmd "<start-cmd>"
+          devkit start <slug>
+        The app should be reachable at http://<slug>.localhost
+        """,
+        step2: "Ask Claude to build a local app"
+    ),
+    AgentConfig(
+        name: "Cursor",
+        icon: "cursorarrow.click",
+        configFile: ".cursor/rules/devkit.mdc",
+        snippet: """
+        ---
+        description: Register new local apps with devkit
+        alwaysApply: true
+        ---
+
+        After creating any local web app or service:
+        - run `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+        - run `devkit start <slug>`
+        - skip if `devkit` is not installed
+        """,
+        step2: "Ask Cursor to build a local app"
+    ),
+    AgentConfig(
+        name: "Codex",
+        icon: "terminal.fill",
+        configFile: "~/.codex/AGENTS.md",
+        snippet: """
+        ## Local Web Apps — devkit
+        After creating any local web app or service:
+          run `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+          run `devkit start <slug>`
+        Use lowercase-hyphenated slugs. Skip if `devkit` is not installed.
+        """,
+        step2: "Ask Codex to build a local app"
+    ),
+    AgentConfig(
+        name: "Copilot",
+        icon: "person.circle.fill",
+        configFile: ".github/copilot-instructions.md",
+        snippet: """
+        ## Local Web Apps — devkit
+        After creating any local web app or service:
+        - run `devkit register <slug> --port <port> --cmd "<start-cmd>"`
+        - run `devkit start <slug>`
+        - use a lowercase-hyphenated slug
+        """,
+        step2: "Ask Copilot to build a local app"
+    ),
+    AgentConfig(
+        name: "Windsurf",
+        icon: "wind",
+        configFile: ".windsurfrules",
+        snippet: """
+        ## Local Web Apps — devkit
+        After creating any local web app or service:
+        - run devkit register <slug> --port <port> --cmd "<start-cmd>"
+        - run devkit start <slug>
+        - use a lowercase-hyphenated slug
+        - skip if devkit is not installed
+        """,
+        step2: "Ask Windsurf to build a local app"
+    ),
+]
 
 private struct ClaudeSetupView: View {
+    @State private var selectedAgent = 0
     @State private var copied = false
-
-    private let snippet = """
-    ## Local Web Apps — devkit
-    After creating any local web app or service:
-      devkit register <slug> --port <port> --cmd "<start-cmd>"
-      devkit start <slug>
-    The app should be reachable at http://<slug>.localhost
-    """
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -369,7 +443,7 @@ private struct ClaudeSetupView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Make future apps show up automatically")
                     .font(.system(size: 13, weight: .semibold))
-                Text("One global rule. New apps Claude builds get a name, URL, and place here without manual setup.")
+                Text("One global rule. New apps your agent builds get a name, URL, and place here.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -379,14 +453,46 @@ private struct ClaudeSetupView: View {
 
             Divider()
 
+            // Agent tabs
+            HStack(spacing: 0) {
+                ForEach(agentConfigs.indices, id: \.self) { i in
+                    let agent = agentConfigs[i]
+                    Button {
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            if selectedAgent != i { copied = false }
+                            selectedAgent = i
+                        }
+                    } label: {
+                        Text(agent.name)
+                            .font(.system(size: 11, weight: selectedAgent == i ? .semibold : .regular))
+                            .foregroundStyle(selectedAgent == i ? Color.primary : Color.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                selectedAgent == i
+                                    ? Color.primary.opacity(0.07)
+                                    : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 5)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+
+            Divider()
+
             // Steps
+            let agent = agentConfigs[selectedAgent]
             VStack(alignment: .leading, spacing: 12) {
                 StepRow(n: "1", text: "Add this snippet to")
-                    + StepRow(n: "", text: "~/.claude/CLAUDE.md")
+                    + StepRow(n: "", text: agent.configFile)
 
                 // Snippet block
                 ZStack(alignment: .topTrailing) {
-                    Text(snippet)
+                    Text(agent.snippet)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -395,7 +501,7 @@ private struct ClaudeSetupView: View {
 
                     Button {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(snippet, forType: .string)
+                        NSPasteboard.general.setString(agent.snippet, forType: .string)
                         withAnimation(.easeOut(duration: 0.15)) { copied = true }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                             withAnimation { copied = false }
@@ -411,7 +517,7 @@ private struct ClaudeSetupView: View {
                     .padding(6)
                 }
 
-                StepRow(n: "2", text: "Ask Claude to build a local app")
+                StepRow(n: "2", text: agent.step2)
                 StepRow(n: "3", text: "It registers itself and appears here with a .localhost URL")
             }
             .padding(.horizontal, 16)
