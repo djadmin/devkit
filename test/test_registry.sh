@@ -245,6 +245,23 @@ assert_eq "old name gone" "0" "$old"
 new_host=$(jq -r '.apps[] | select(.name=="renamed-app") | .hostname' "$TMP_HOME/apps.json")
 assert_eq "hostname updated" "renamed-app.localhost" "$new_host"
 
+# -- update --
+echo "--- update ---"
+out=$("$DEVKIT" update renamed-app --desc "updated description" --cmd "new-cmd --port 5099" 2>&1 || true)
+assert_contains "update prints name" "renamed-app" "$out"
+
+new_desc=$(jq -r '.apps[] | select(.name=="renamed-app") | .description' "$TMP_HOME/apps.json")
+assert_eq "update sets description" "updated description" "$new_desc"
+
+new_cmd=$(jq -r '.apps[] | select(.name=="renamed-app") | .startCmd' "$TMP_HOME/apps.json")
+assert_eq "update sets cmd" "new-cmd --port 5099" "$new_cmd"
+
+out=$("$DEVKIT" update nonexistent --desc "x" 2>&1 || true)
+assert_contains "update rejects unknown app" "unknown app" "$out"
+
+out=$("$DEVKIT" update renamed-app 2>&1 || true)
+assert_contains "update requires at least one flag" "nothing to update" "$out"
+
 # -- list --
 echo "--- list ---"
 out=$("$DEVKIT" list 2>&1 || true)

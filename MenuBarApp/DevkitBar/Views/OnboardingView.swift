@@ -52,13 +52,19 @@ private struct FoundPortsView: View {
     let ports: [Int]
     let onSkip: () -> Void
 
+    @State private var extraPorts: [Int] = []
     @State private var names: [Int: String] = [:]
+    @State private var cmds: [Int: String] = [:]
     @State private var tracked: Set<Int> = []
     @State private var tracking: Set<Int> = []
     @State private var busy = false
+    @State private var manualPort = ""
+    @State private var checkingManual = false
+    @State private var manualError: String? = nil
 
-    private var allTracked: Bool { ports.allSatisfy { tracked.contains($0) } }
-    private var untracked: [Int] { ports.filter { !tracked.contains($0) } }
+    private var allPorts: [Int] { (ports + extraPorts).sorted() }
+    private var allTracked: Bool { allPorts.allSatisfy { tracked.contains($0) } }
+    private var untracked: [Int] { allPorts.filter { !tracked.contains($0) } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -68,7 +74,7 @@ private struct FoundPortsView: View {
                     Image(systemName: "sparkles")
                         .foregroundStyle(Color(hex: "f59e0b"))
                         .imageScale(.small)
-                    Text("Found \(ports.count) running app\(ports.count == 1 ? "" : "s")")
+                    Text("Found \(allPorts.count) running app\(allPorts.count == 1 ? "" : "s")")
                         .font(.system(size: 12, weight: .semibold))
                     Spacer()
                     if !allTracked {
@@ -83,7 +89,7 @@ private struct FoundPortsView: View {
                         .disabled(busy || !tracking.isEmpty)
                     }
                 }
-                Text("Track what is already open so it gets a stable name, URL, and a place in devkit.")
+                Text("Name each app and optionally add its start command so devkit can restart it later.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -93,19 +99,21 @@ private struct FoundPortsView: View {
             Divider()
 
             // Port rows
-            ForEach(ports, id: \.self) { port in
+            ForEach(allPorts, id: \.self) { port in
                 PortRow(
                     port: port,
-                    name: binding(for: port),
+                    name: nameBinding(for: port),
+                    cmd: cmdBinding(for: port),
                     isTracked: tracked.contains(port),
                     isBusy: busy || tracking.contains(port)
                 ) {
                     Task { await track(port: port) }
                 }
-                if port != ports.last {
-                    Divider().padding(.leading, 16)
-                }
+                Divider().padding(.leading, 16)
             }
+
+            // Manual port input
+            manualPortRow
 
             // Footer
             Divider()
@@ -124,8 +132,82 @@ private struct FoundPortsView: View {
         }
     }
 
-    private func binding(for port: Int) -> Binding<String> {
+    // MARK: – Manual port row
+
+    private var manualPortRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .imageScale(.small)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 14)
+
+                TextField("add port…", text: $manualPort)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(width: 56)
+                    .onSubmit { Task { await addManualPort() } }
+                    .onChange(of: manualPort) { _, _ in manualError = nil }
+
+                if checkingManual {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button("Add") { Task { await addManualPort() } }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(manualPort.isEmpty ? Color.secondary.opacity(0.3) : Color.secondary)
+                        .buttonStyle(.plain)
+                        .disabled(manualPort.isEmpty)
+                }
+
+                if let err = manualError {
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(hex: "ef4444"))
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: – Bindings
+
+    private func nameBinding(for port: Int) -> Binding<String> {
         Binding(get: { names[port] ?? "" }, set: { names[port] = $0 })
+    }
+
+    private func cmdBinding(for port: Int) -> Binding<String> {
+        Binding(get: { cmds[port] ?? "" }, set: { cmds[port] = $0 })
+    }
+
+    // MARK: – Actions
+
+    @MainActor
+    private func addManualPort() async {
+        let raw = manualPort.trimmingCharacters(in: .whitespaces)
+        guard let port = Int(raw), port > 0, port < 65536 else {
+            manualError = "invalid port"
+            return
+        }
+        guard !allPorts.contains(port) else {
+            manualError = "already listed"
+            return
+        }
+        checkingManual = true
+        manualError = nil
+        defer { checkingManual = false }
+
+        let reachable = await PortChecker.isReachable(port: port)
+        guard reachable else {
+            manualError = "nothing on :\(port)"
+            return
+        }
+        withAnimation(.easeOut(duration: 0.15)) {
+            extraPorts.append(port)
+            manualPort = ""
+        }
     }
 
     @MainActor
@@ -134,7 +216,6 @@ private struct FoundPortsView: View {
         let raw = (name?.isEmpty == false ? name! : "app-\(port)")
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
-        // Strip anything that isn't alphanumeric or hyphen to prevent flag injection
         let slug = raw.replacingOccurrences(of: #"[^a-z0-9\-]"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let safeName = slug.isEmpty ? "app-\(port)" : slug
@@ -144,14 +225,15 @@ private struct FoundPortsView: View {
         registry.errorMessage = nil
         defer { tracking.remove(port) }
 
-        let result = await DevkitCLI.run([
-            "register",
-            safeName,
-            "--port",
-            String(port),
-            "--managed-by",
-            "external",
-        ])
+        let cmdText = cmds[port]?.trimmingCharacters(in: .whitespaces) ?? ""
+        let result: DevkitCLI.Result
+        if cmdText.isEmpty {
+            result = await DevkitCLI.run(["register", safeName, "--port", String(port), "--managed-by", "external"])
+        } else {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            result = await DevkitCLI.run(["register", safeName, "--port", String(port), "--cmd", cmdText, "--path", home])
+        }
+
         guard result.exitCode == 0 else {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             registry.errorMessage = message.isEmpty ? "Could not track app on port \(port)" : message
@@ -167,7 +249,6 @@ private struct FoundPortsView: View {
     private func trackAll() async {
         busy = true
         defer { busy = false }
-
         for port in untracked {
             await track(port: port)
             if registry.errorMessage != nil { break }
@@ -180,6 +261,7 @@ private struct FoundPortsView: View {
 private struct PortRow: View {
     let port: Int
     @Binding var name: String
+    @Binding var cmd: String
     let isTracked: Bool
     let isBusy: Bool
     let onTrack: () -> Void
@@ -187,63 +269,83 @@ private struct PortRow: View {
     @Environment(\.openURL) private var openURL
     @State private var hovered = false
     @State private var peekHovered = false
-    @FocusState private var focused: Bool
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Status dot
-            Circle()
-                .fill(isTracked ? Color(hex: "a78bfa") : Color(hex: "22c55e"))
-                .frame(width: 7, height: 7)
-                .shadow(color: Color(hex: "22c55e").opacity(isTracked ? 0 : 0.5), radius: 4)
+        VStack(spacing: 0) {
+            // Main row
+            HStack(spacing: 10) {
+                // Status dot
+                Circle()
+                    .fill(isTracked ? Color(hex: "a78bfa") : Color(hex: "22c55e"))
+                    .frame(width: 7, height: 7)
+                    .shadow(color: Color(hex: "22c55e").opacity(isTracked ? 0 : 0.5), radius: 4)
 
-            // Port label + peek
-            HStack(spacing: 3) {
-                Text(verbatim: ":\(port)")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Button {
-                    if let url = URL(string: "http://localhost:\(port)") { openURL(url) }
-                } label: {
-                    Image(systemName: "arrow.up.right.square")
-                        .imageScale(.small)
-                        .foregroundStyle(peekHovered ? Color.accentColor : Color.secondary.opacity(0.3))
-                }
-                .buttonStyle(.plain)
-                .onHover { peekHovered = $0 }
-                .help("Open in browser to see what's running")
-            }
-            .frame(width: 70, alignment: .leading)
-
-            if isTracked {
-                Text(name.isEmpty ? "app-\(port)" : name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Image(systemName: "checkmark")
-                    .imageScale(.small)
-                    .foregroundStyle(Color(hex: "a78bfa"))
-            } else {
-                TextField("name this app", text: $name)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .focused($focused)
-                    .disabled(isBusy)
-                    .onSubmit { if !name.isEmpty && !isBusy { onTrack() } }
-
-                Spacer()
-
-                Button(isBusy ? "Tracking…" : "Track") { onTrack() }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(hovered ? Color(hex: "22c55e") : Color(hex: "22c55e").opacity(0.6))
+                // Port label + peek
+                HStack(spacing: 3) {
+                    Text(verbatim: ":\(port)")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Button {
+                        if let url = URL(string: "http://localhost:\(port)") { openURL(url) }
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                            .imageScale(.small)
+                            .foregroundStyle(peekHovered ? Color.accentColor : Color.secondary.opacity(0.3))
+                    }
                     .buttonStyle(.plain)
-                    .disabled(isBusy)
-                    .onHover { hovered = $0 }
-                    .animation(.easeOut(duration: 0.1), value: hovered)
+                    .onHover { peekHovered = $0 }
+                    .help("Open in browser to see what's running")
+                }
+                .frame(width: 70, alignment: .leading)
+
+                if isTracked {
+                    Text(name.isEmpty ? "app-\(port)" : name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: cmd.isEmpty ? "checkmark" : "checkmark.circle.fill")
+                        .imageScale(.small)
+                        .foregroundStyle(Color(hex: "a78bfa"))
+                        .help(cmd.isEmpty ? "Tracked as external" : "devkit can start/stop this app")
+                } else {
+                    TextField("name this app", text: $name)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .focused($nameFocused)
+                        .disabled(isBusy)
+                        .onSubmit { if !name.isEmpty && !isBusy { onTrack() } }
+
+                    Spacer()
+
+                    Button(isBusy ? "Tracking…" : "Track") { onTrack() }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(hovered ? Color(hex: "22c55e") : Color(hex: "22c55e").opacity(0.6))
+                        .buttonStyle(.plain)
+                        .disabled(isBusy)
+                        .onHover { hovered = $0 }
+                        .animation(.easeOut(duration: 0.1), value: hovered)
+                }
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+
+            // Cmd row — shown only when not yet tracked
+            if !isTracked {
+                HStack(spacing: 0) {
+                    // Indent to align with the name field
+                    Spacer().frame(width: 97)
+                    TextField("start cmd (optional, enables restart)", text: $cmd)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .disabled(isBusy)
+                        .onSubmit { if !name.isEmpty && !isBusy { onTrack() } }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
         .animation(.easeOut(duration: 0.2), value: isTracked)
     }
 }
@@ -350,7 +452,6 @@ private struct StepRow: View {
         }
     }
 
-    // Allow `+` concatenation for multi-part rows
     static func + (lhs: StepRow, rhs: StepRow) -> some View {
         VStack(alignment: .leading, spacing: 2) { lhs; rhs }
     }

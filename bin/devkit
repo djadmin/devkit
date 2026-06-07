@@ -341,6 +341,67 @@ cmd_rename() {
   fi
 }
 
+cmd_update() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: devkit update <name> [--port N] [--cmd C] [--path P] [--desc D] [--managed-by M]"
+  shift
+
+  migrate_legacy_registry
+  jq -e --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null 2>&1 || die "unknown app: $name"
+
+  local port="" cmd="" path="" desc="" managed=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --port)       port="$2";    shift 2 ;;
+      --cmd)        cmd="$2";     shift 2 ;;
+      --path)       path="$2";    shift 2 ;;
+      --desc)       desc="$2";    shift 2 ;;
+      --managed-by) managed="$2"; shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+
+  [[ -n "$port$cmd$path$desc$managed" ]] || die "nothing to update — specify at least one flag"
+
+  if [[ -n "$path" ]]; then
+    path="$(cd "$path" 2>/dev/null && pwd -P)" || die "path does not exist: $path"
+  fi
+
+  # If running and the port is changing, stop first then restart after
+  local was_running=false
+  if [[ -n "$port" ]] && is_running "$name"; then
+    was_running=true
+    local old_port old_path
+    old_port=$(app_port "$name")
+    old_path=$(app_path "$name")
+    _stop_by_name "$name" "$old_port" "$old_path" || die "$name did not stop cleanly"
+  fi
+
+  local tmp; tmp=$(mktemp)
+  jq \
+    --arg name    "$name" \
+    --arg port    "$port" \
+    --arg cmd     "$cmd" \
+    --arg path    "$path" \
+    --arg desc    "$desc" \
+    --arg managed "$managed" \
+    '.apps |= map(if .name != $name then . else . *
+      (if $port    != "" then {port: ($port | tonumber)} else {} end) *
+      (if $cmd     != "" then {startCmd: $cmd}           else {} end) *
+      (if $path    != "" then {path: $path}              else {} end) *
+      (if $desc    != "" then {description: $desc}       else {} end) *
+      (if $managed != "" then {managedBy: $managed}      else {} end)
+    end)' "$APPS_JSON" > "$tmp"
+  mv "$tmp" "$APPS_JSON"
+
+  echo "updated $name"
+  cmd_reload
+
+  if [[ "$was_running" == true ]]; then
+    cmd_start "$name"
+  fi
+}
+
 cmd_remove() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit remove <name>"
@@ -872,6 +933,7 @@ Registry:
   devkit register <name> --port N --cmd "C" [--path P] [--repo URL] [--desc "..."]
                               [--managed-by devkit|external]
   devkit rename <old> <new>
+  devkit update <name> [--port N] [--cmd C] [--path P] [--desc D] [--managed-by M]
   devkit remove <name>
   devkit list
   devkit show <name>
@@ -904,6 +966,7 @@ cmd_version() { echo "devkit $DEVKIT_VERSION"; }
 case "${1:-help}" in
   register)    shift; cmd_register "$@" ;;
   rename)      shift; cmd_rename "$@" ;;
+  update)      shift; cmd_update "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
   list)        cmd_list ;;
   show)        shift; cmd_show "$@" ;;
