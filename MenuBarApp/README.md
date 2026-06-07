@@ -6,7 +6,7 @@
 
   <p>
     <img src="https://img.shields.io/badge/status-beta-orange?style=flat-square" alt="Beta" />
-    <img src="https://img.shields.io/badge/macOS-13%2B-brightgreen?style=flat-square&logo=apple" alt="macOS 13+" />
+    <img src="https://img.shields.io/badge/macOS-14%2B-brightgreen?style=flat-square&logo=apple" alt="macOS 14+" />
     <img src="https://img.shields.io/badge/Swift-5.9-orange?style=flat-square&logo=swift" alt="Swift 5.9" />
     <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License" />
     <img src="https://img.shields.io/badge/agent--first-Claude%20%7C%20Cursor%20%7C%20Codex-6366f1?style=flat-square" alt="Agent first" />

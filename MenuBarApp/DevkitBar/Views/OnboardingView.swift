@@ -184,7 +184,9 @@ private struct PortRow: View {
     let isBusy: Bool
     let onTrack: () -> Void
 
+    @Environment(\.openURL) private var openURL
     @State private var hovered = false
+    @State private var peekHovered = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -195,11 +197,23 @@ private struct PortRow: View {
                 .frame(width: 7, height: 7)
                 .shadow(color: Color(hex: "22c55e").opacity(isTracked ? 0 : 0.5), radius: 4)
 
-            // Port label
-            Text(":\(port)")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 46, alignment: .leading)
+            // Port label + peek
+            HStack(spacing: 3) {
+                Text(verbatim: ":\(port)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Button {
+                    if let url = URL(string: "http://localhost:\(port)") { openURL(url) }
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                        .imageScale(.small)
+                        .foregroundStyle(peekHovered ? Color.accentColor : Color.secondary.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+                .onHover { peekHovered = $0 }
+                .help("Open in browser to see what's running")
+            }
+            .frame(width: 70, alignment: .leading)
 
             if isTracked {
                 Text(name.isEmpty ? "app-\(port)" : name)

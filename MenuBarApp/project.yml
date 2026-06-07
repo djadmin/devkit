@@ -1,7 +1,7 @@
 name: DevkitBar
 options:
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   xcodeVersion: "16"
   createIntermediateGroups: true
   bundleIdPrefix: com.devkit
@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
     ENABLE_HARDENED_RUNTIME: YES
     DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
 
@@ -17,7 +17,7 @@ targets:
   DevkitBar:
     type: application
     platform: macOS
-    deploymentTarget: "13.0"
+    deploymentTarget: "14.0"
     sources:
       - path: DevkitBar
     settings:

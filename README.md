@@ -128,7 +128,7 @@ The CLI explicitly covers stale pid files, orphan recovery, restart pressure, po
 
 ## Requirements
 
-- macOS 13+
+- macOS 14+ (menu bar app) · macOS 13+ (CLI only)
 - [Homebrew](https://brew.sh)
 - `jq`
 - `caddy`
