@@ -4,6 +4,21 @@ All notable changes to devkit are documented here.
 
 ---
 
+## [0.3.0] — 2026-06-08
+
+### Mac app — full window
+
+- **Services view** — rich list with running/stopped/registered stats bar, start/stop, search, and Add Service sheet
+- **Agent Setup view** — detects Claude Code, Codex, Cursor, and Windsurf installations; patches `CLAUDE.md` / `AGENTS.md` directly in-app; copy-snippet sheet for agents with no writable global config
+- **Discover view** — port scanner using `lsof` to identify process names; one-click import with suggested names; re-scan button
+- **Logs view** — live log tail per service with 2s auto-refresh; sidebar picker for service selection
+- `AppEntry` now `Hashable` (required for `List` selection binding in Logs)
+- Menu bar popover empty state simplified — points to main window instead of inline onboarding
+- 8 unit tests for `AgentConfigManager` (all passing)
+- `Mac App` CI workflow — builds + runs tests on every push to `MenuBarApp/`
+
+---
+
 ## [0.2.0] — 2026-06-07
 
 ### CLI
