@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>devkit — Alpha Tester Access</title>
+  <meta name="description" content="You're in. Get devkit, try it, break it, tell me what you find." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #060b18; --bg2: #0d1628; --bg3: #162035;
+      --border: rgba(255,255,255,0.08);
+      --text: #eef3fc; --muted: #64748b; --faint: #2d3f5e;
+      --accent: #6366f1; --acc2: #818cf8;
+      --green: #22c55e; --amber: #f59e0b;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Inter', -apple-system, sans-serif;
+      font-size: 16px; line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    code, .mono { font-family: 'JetBrains Mono', monospace; }
+
+    nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 40px; height: 52px;
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px; font-weight: 600;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .nav-right { font-size: 13px; color: var(--muted); }
+    .nav-right a { color: var(--acc2); }
+
+    .wrap { max-width: 640px; margin: 0 auto; padding: 72px 32px 80px; }
+
+    .alpha-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 100px;
+      background: rgba(245,158,11,0.1);
+      border: 1px solid rgba(245,158,11,0.28);
+      font-size: 11.5px; font-weight: 600; color: var(--amber);
+      letter-spacing: 0.04em; text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 14px; line-height: 1.15; }
+    h1 em { font-style: normal; color: var(--acc2); }
+    .lead { font-size: 16px; color: var(--muted); margin-bottom: 48px; line-height: 1.7; }
+
+    /* Cards */
+    .card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 14px; padding: 28px 28px 24px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+      color: var(--faint); text-transform: uppercase; margin-bottom: 16px;
+    }
+    .step-row {
+      display: flex; gap: 14px; align-items: flex-start;
+      margin-bottom: 16px;
+    }
+    .step-row:last-child { margin-bottom: 0; }
+    .step-n {
+      width: 24px; height: 24px; border-radius: 6px;
+      background: rgba(99,102,241,0.12);
+      border: 1px solid rgba(99,102,241,0.25);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 600; color: var(--acc2);
+      flex-shrink: 0; margin-top: 1px;
+    }
+    .step-body { flex: 1; }
+    .step-label { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .step-sub { font-size: 13px; color: var(--muted); line-height: 1.55; }
+    pre {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px; margin-top: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; color: var(--acc2);
+      white-space: pre; overflow-x: auto; line-height: 1.65;
+    }
+
+    /* Focus areas */
+    .areas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+    .area {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px;
+    }
+    .area-icon { font-size: 18px; margin-bottom: 6px; }
+    .area-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .area-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+    /* Known issues */
+    .issues { display: flex; flex-direction: column; gap: 8px; }
+    .issue {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 13px; color: var(--muted); line-height: 1.55;
+    }
+    .issue-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex-shrink: 0; margin-top: 7px; }
+
+    /* CTA */
+    .cta-card {
+      background: linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(99,102,241,0.04) 100%);
+      border: 1px solid rgba(99,102,241,0.3);
+      border-radius: 14px; padding: 28px;
+      margin-top: 24px; text-align: center;
+    }
+    .cta-title { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+    .cta-sub { font-size: 14px; color: var(--muted); margin-bottom: 20px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 11px 22px; border-radius: 10px;
+      font-size: 14px; font-weight: 600;
+      transition: background .15s, transform .12s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--acc2); transform: translateY(-1px); }
+    .btn-ghost {
+      border: 1px solid var(--border); color: var(--muted); margin-left: 8px;
+    }
+    .btn-ghost:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
+
+    footer {
+      border-top: 1px solid var(--border); margin-top: 60px;
+      padding: 28px 32px; max-width: 640px; margin-left: auto; margin-right: auto;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 13px; color: var(--faint);
+    }
+    footer a { color: var(--muted); }
+
+    @media (max-width: 600px) {
+      .wrap { padding: 48px 20px 60px; }
+      nav { padding: 0 20px; }
+      .areas { grid-template-columns: 1fr; }
+      .btn-ghost { margin-left: 0; margin-top: 8px; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo"><div class="dot"></div>devkit</div>
+  <div class="nav-right">Alpha · <a href="index.html">Back to site →</a></div>
+</nav>
+
+<div class="wrap">
+
+  <div class="alpha-badge">Alpha Tester Access</div>
+  <h1>You're in. Help me make<br>devkit <em>actually work.</em></h1>
+  <p class="lead">
+    devkit is rough around the edges — that's why I'm starting with a small group.
+    Install it, use it for a few days, and tell me what breaks or feels wrong.
+    That feedback shapes what gets fixed first.
+  </p>
+
+  <!-- INSTALL -->
+  <div class="card">
+    <div class="card-title">Step 1 — Install</div>
+    <div class="step-row">
+      <div class="step-n">1</div>
+      <div class="step-body">
+        <div class="step-label">CLI + menu bar app</div>
+        <div class="step-sub">Run this in Terminal. Requires macOS 14+ and Homebrew.</div>
+        <pre>brew tap djadmin/tap
+brew install devkit
+brew install --cask devkit
+devkit bootstrap</pre>
+      </div>
+    </div>
+    <div class="step-row">
+      <div class="step-n">2</div>
+      <div class="step-body">
+        <div class="step-label">Register an app to try it</div>
+        <div class="step-sub">If you have something running on localhost, bring it in.</div>
+        <pre>devkit register myapp --port 3000 --managed-by external</pre>
+      </div>
+    </div>
+    <div class="step-row">
+      <div class="step-n">3</div>
+      <div class="step-body">
+        <div class="step-label">Wire your AI agent (optional but the point)</div>
+        <div class="step-sub">Add this to <code>~/.claude/CLAUDE.md</code> so Claude registers apps automatically.</div>
+        <pre>## devkit — App Registration
+After creating any web app or local service:
+devkit register &lt;name&gt; --port &lt;port&gt; --cmd "&lt;start-cmd&gt;"</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHAT TO TEST -->
+  <div class="card">
+    <div class="card-title">What to focus on</div>
+    <div class="areas">
+      <div class="area">
+        <div class="area-icon">🔌</div>
+        <div class="area-name">Install &amp; bootstrap</div>
+        <div class="area-desc">Does Caddy start? Does <code>devkit bootstrap</code> finish cleanly?</div>
+      </div>
+      <div class="area">
+        <div class="area-icon">📋</div>
+        <div class="area-name">Register + start/stop</div>
+        <div class="area-desc">Do lifecycle commands work? Does <code>devkit stop</code> actually kill the process?</div>
+      </div>
+      <div class="area">
+        <div class="area-icon">🖥️</div>
+        <div class="area-name">Menu bar app</div>
+        <div class="area-desc">Does the popover open? Does status poll correctly? Does the Mac window open?</div>
+      </div>
+      <div class="area">
+        <div class="area-icon">🤖</div>
+        <div class="area-name">Agent auto-register</div>
+        <div class="area-desc">Ask Claude to build something. Does it auto-register? Does the app appear?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KNOWN ISSUES -->
+  <div class="card">
+    <div class="card-title">Known rough edges</div>
+    <div class="issues">
+      <div class="issue"><div class="issue-dot"></div>Externally-supervised processes (nodemon, launchd, respawners) may restart after stop — a race, not a bug we've fixed yet</div>
+      <div class="issue"><div class="issue-dot"></div>The Mac window (Services / Agent Setup / Discover / Logs) is new in v0.3.0 — most likely to have visual issues on different display sizes</div>
+      <div class="issue"><div class="issue-dot"></div>Auto-update not implemented — you'll need to re-brew install for new versions</div>
+      <div class="issue"><div class="issue-dot"></div>Launch at login not yet available</div>
+    </div>
+  </div>
+
+  <!-- FEEDBACK CTA -->
+  <div class="cta-card">
+    <div class="cta-title">Found something? Tell me.</div>
+    <div class="cta-sub">
+      File a GitHub issue or email me directly — both work. Include what you ran, what happened, and what you expected.
+    </div>
+    <a href="https://github.com/djadmin/devkit/issues/new" class="btn btn-primary" target="_blank">Open a GitHub issue →</a>
+    <a href="mailto:dheerajjoshi1991@gmail.com?subject=devkit alpha feedback" class="btn btn-ghost">Email me</a>
+  </div>
+
+</div>
+
+<footer>
+  <span>devkit alpha · v0.3.0</span>
+  <a href="https://github.com/djadmin/devkit" target="_blank">GitHub →</a>
+</footer>
+
+</body>
+</html>
