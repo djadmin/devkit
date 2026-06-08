@@ -1,610 +1,506 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>devkit — The home for every local app your AI builds.</title>
-  <meta name="description" content="devkit gives every local app your AI builds a stable name, .localhost URL, and one place to reopen or control it on macOS." />
-  <meta property="og:title" content="devkit" />
-  <meta property="og:description" content="The home for every local app your AI builds. $29 early access — lifetime updates, 30-day refund." />
-  <meta name="twitter:card" content="summary_large_image" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>devkit — Every app your AI builds, tracked.</title>
+<meta name="description" content="A macOS menu bar app for developers who ship too many things. Register once, track everything. Open source."/>
+<meta property="og:title" content="devkit — Every app your AI builds, tracked."/>
+<meta property="og:description" content="One line in your AI agent config. Every project gets a .localhost URL and appears in your menu bar automatically."/>
+<meta name="twitter:card" content="summary_large_image"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060b18;--bg2:#0d1628;--bg3:#162035;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --text:#eef3fc;--muted:#64748b;--faint:#2d3f5e;
+  --accent:#6366f1;--acc2:#818cf8;
+  --green:#22c55e;--red:#ef4444;--amber:#f59e0b;--purple:#a78bfa;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,sans-serif;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+code,.mono{font-family:'JetBrains Mono',monospace}
 
-    :root {
-      --bg:      #060b18;
-      --bg2:     #0d1628;
-      --bg3:     #162035;
-      --border:  rgba(255,255,255,0.08);
-      --text:    #eef3fc;
-      --muted:   #64748b;
-      --faint:   #2d3f5e;
-      --accent:  #6366f1;
-      --acc2:    #818cf8;
-      --green:   #22c55e;
-      --red:     #ef4444;
-    }
+/* NAV */
+nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 40px;height:58px;background:rgba(6,11,24,.9);backdrop-filter:blur(18px);border-bottom:1px solid var(--border)}
+.nav-logo{display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600}
+.nav-pulse{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pglow 2.5s ease-in-out infinite}
+@keyframes pglow{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}50%{box-shadow:0 0 0 5px rgba(34,197,94,0)}}
+.nav-links{display:flex;align-items:center;gap:6px}
+.nav-link{padding:6px 13px;border-radius:8px;font-size:14px;color:var(--muted);transition:color .15s,background .15s}
+.nav-link:hover{color:var(--text);background:rgba(255,255,255,.05)}
+.nav-cta{padding:7px 18px;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;font-weight:500;transition:background .15s,transform .1s}
+.nav-cta:hover{background:var(--acc2);transform:translateY(-1px)}
 
-    html { scroll-behavior: smooth; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Inter', -apple-system, sans-serif;
-      font-size: 16px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-    a { color: inherit; text-decoration: none; }
-    code, .mono { font-family: 'JetBrains Mono', monospace; }
+/* HERO */
+.hero{max-width:1100px;margin:0 auto;padding:88px 40px 80px;display:grid;grid-template-columns:1fr 400px;gap:64px;align-items:center}
+.badge{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:100px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.28);font-size:12px;font-weight:500;color:var(--acc2);margin-bottom:20px}
+.badge-pip{width:5px;height:5px;border-radius:50%;background:var(--green)}
+h1{font-size:clamp(32px,4.5vw,50px);font-weight:800;line-height:1.1;letter-spacing:-.035em;margin-bottom:18px}
+h1 em{font-style:normal;color:var(--acc2)}
+.hero-sub{font-size:17px;color:var(--muted);line-height:1.65;margin-bottom:32px;max-width:440px}
+.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.btn-primary{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:500;transition:background .15s,transform .12s}
+.btn-primary:hover{background:var(--acc2);transform:translateY(-1px)}
+.btn-ghost{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:10px;border:1px solid var(--border2);color:var(--muted);font-size:15px;font-weight:500;transition:border-color .15s,color .15s}
+.btn-ghost:hover{border-color:rgba(255,255,255,.25);color:var(--text)}
+.hero-meta{font-size:13px;color:var(--faint)}
 
-    /* ── NAV ── */
-    nav {
-      position: sticky; top: 0; z-index: 100;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 40px; height: 58px;
-      background: rgba(6,11,24,0.88);
-      backdrop-filter: blur(18px);
-      border-bottom: 1px solid var(--border);
-    }
-    .nav-logo {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 16px; font-weight: 600;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .nav-logo-dot {
-      width: 7px; height: 7px; border-radius: 50%;
-      background: var(--green);
-      box-shadow: 0 0 7px var(--green);
-    }
-    .nav-links { display: flex; align-items: center; gap: 6px; }
-    .nav-link {
-      padding: 6px 13px; border-radius: 8px;
-      font-size: 14px; color: var(--muted);
-      transition: color .15s, background .15s;
-    }
-    .nav-link:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-    .nav-cta {
-      padding: 7px 16px; border-radius: 8px;
-      background: var(--accent); color: #fff;
-      font-size: 14px; font-weight: 500;
-      transition: background .15s;
-    }
-    .nav-cta:hover { background: var(--acc2); }
+/* MENU BAR MOCKUP */
+.demo-wrap{position:relative;display:flex;flex-direction:column;align-items:center;gap:10px}
+.demo-wrap::before{content:'';position:absolute;inset:-40px;background:radial-gradient(ellipse,rgba(99,102,241,.18) 0%,transparent 70%);pointer-events:none;z-index:0}
+.live-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:100px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);font-size:11px;color:rgba(34,197,94,.9);position:relative;z-index:1}
+.live-dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pglow 1.8s ease-in-out infinite}
+.mac-bar{width:380px;background:rgba(28,28,28,.97);border-radius:8px 8px 0 0;padding:5px 13px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.4);position:relative;z-index:2}
+.mac-bar-grp{display:flex;gap:12px;align-items:center}
+.mb-btn{display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.12);border-radius:5px;padding:2px 8px;color:rgba(255,255,255,.9);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;transition:background .15s;user-select:none}
+.mb-btn:hover{background:rgba(255,255,255,.22)}
+.mb-badge{background:var(--green);color:#fff;font-size:9px;font-weight:700;padding:0 4px;border-radius:3px}
 
-    /* ── HERO ── */
-    .hero {
-      max-width: 1080px; margin: 0 auto;
-      padding: 96px 40px 80px;
-      display: grid; grid-template-columns: 1fr 420px;
-      gap: 64px; align-items: center;
-    }
-    .badge {
-      display: inline-flex; align-items: center; gap: 7px;
-      padding: 5px 12px; border-radius: 100px;
-      background: rgba(99,102,241,0.1);
-      border: 1px solid rgba(99,102,241,0.28);
-      font-size: 12px; font-weight: 500; color: var(--acc2);
-      margin-bottom: 22px;
-    }
-    .badge-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
-    h1 {
-      font-size: clamp(32px,4.5vw,48px);
-      font-weight: 700; line-height: 1.12;
-      letter-spacing: -0.03em; margin-bottom: 18px;
-    }
-    h1 em { font-style: normal; color: var(--acc2); }
-    .hero-sub {
-      font-size: 17px; color: var(--muted);
-      line-height: 1.65; margin-bottom: 32px; max-width: 440px;
-    }
-    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
-    .btn-primary {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 12px 22px; border-radius: 10px;
-      background: var(--accent); color: #fff;
-      font-size: 15px; font-weight: 500;
-      transition: background .15s, transform .12s;
-    }
-    .btn-primary:hover { background: var(--acc2); transform: translateY(-1px); }
-    .btn-ghost {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 12px 22px; border-radius: 10px;
-      border: 1px solid var(--border); color: var(--muted);
-      font-size: 15px; font-weight: 500;
-      transition: border-color .15s, color .15s;
-    }
-    .btn-ghost:hover { border-color: rgba(255,255,255,0.25); color: var(--text); }
+/* POPOVER */
+.pop{width:360px;background:rgba(11,18,34,.97);border:1px solid rgba(255,255,255,.1);border-radius:14px;overflow:hidden;box-shadow:0 32px 64px rgba(0,0,0,.6);position:relative;z-index:2}
+.pop-hdr{display:flex;align-items:center;gap:9px;padding:13px 15px 11px;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02)}
+.pop-bar{width:3px;height:20px;border-radius:2px;background:var(--accent)}
+.pop-title-w{flex:1}
+.pop-title{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600}
+.pop-sub{font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:4px;margin-top:2px}
+.pop-sdot{width:5px;height:5px;border-radius:50%}
+.pop-srch{margin:8px 11px 7px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--faint)}
+.pop-sec{display:flex;justify-content:space-between;padding:5px 14px;background:rgba(255,255,255,.025)}
+.pop-slbl{font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--faint);text-transform:uppercase}
+.pop-sact{font-size:9.5px;font-weight:600;cursor:pointer;user-select:none}
+.pop-row{display:flex;align-items:center;height:44px;padding:0 10px 0 13px;border-bottom:1px solid rgba(255,255,255,.04)}
+.pop-ico{width:27px;height:27px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;margin-right:10px;position:relative}
+.pop-ico::after{content:'';position:absolute;top:2px;left:3px;right:3px;height:40%;background:linear-gradient(to bottom,rgba(255,255,255,.16),transparent);border-radius:4px 4px 0 0}
+.pop-bd{position:absolute;bottom:-2px;right:-2px;width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(11,18,34,.97)}
+.bdg{background:var(--green);box-shadow:0 0 6px rgba(34,197,94,.7)}
+.bdr{background:var(--red)}
+.pop-info{flex:1;min-width:0}
+.pop-name{font-size:12px;font-weight:600;color:#dde4f0}
+.pop-name.dim{color:var(--faint)}
+.pop-host{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--faint)}
+.pop-btns{display:flex;gap:2px;opacity:.5}
+.pop-btn{width:21px;height:21px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;cursor:pointer;transition:opacity .1s}
+.pop-btn:hover{opacity:1!important}
+.pop-btn.stp{color:rgba(239,68,68,.85)}
+.pop-btn.ply{color:rgba(34,197,94,.85)}
+.pop-gdiv{height:1px;background:rgba(255,255,255,.06);margin:2px 0}
+.pop-foot{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border-top:1px solid rgba(255,255,255,.07)}
+.pop-fl{font-size:10.5px;color:var(--faint);cursor:pointer;transition:color .12s;user-select:none}
+.pop-fl:hover{color:var(--text)}
+.pop-fr{font-size:10.5px;color:rgba(239,68,68,.45)}
 
-    /* ── APP MOCKUP ── */
-    .mockup {
-      position: relative;
-    }
-    .mockup::before {
-      content: '';
-      position: absolute; inset: -40px;
-      background: radial-gradient(ellipse, rgba(99,102,241,0.16) 0%, transparent 70%);
-      pointer-events: none;
-    }
-    .app-window {
-      background: rgba(13,22,40,0.95);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 14px; overflow: hidden;
-      box-shadow: 0 40px 80px rgba(0,0,0,0.55);
-    }
-    .aw-header {
-      display: flex; align-items: center; gap: 9px;
-      padding: 13px 15px 11px;
-      border-bottom: 1px solid rgba(255,255,255,0.07);
-      background: rgba(255,255,255,0.02);
-    }
-    .aw-bar { width: 3px; height: 20px; border-radius: 2px; background: var(--accent); }
-    .aw-title-wrap { flex: 1; }
-    .aw-title { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; }
-    .aw-sub { font-size: 10.5px; color: var(--muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }
-    .aw-sub-dot { width: 5px; height: 5px; border-radius: 50%; background: #f59e0b; }
-    .aw-reload { color: var(--faint); font-size: 14px; }
-    .aw-search {
-      margin: 8px 11px 7px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.07);
-      border-radius: 8px; padding: 7px 10px;
-      font-size: 12px; color: var(--faint);
-      display: flex; align-items: center; gap: 6px;
-    }
-    .aw-sec {
-      display: flex; justify-content: space-between;
-      padding: 5px 14px;
-      background: rgba(255,255,255,0.025);
-    }
-    .aw-sec-lbl { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; color: var(--faint); text-transform: uppercase; }
-    .aw-sec-act-r { font-size: 9.5px; font-weight: 600; color: rgba(239,68,68,0.6); }
-    .aw-sec-act-g { font-size: 9.5px; font-weight: 600; color: rgba(34,197,94,0.6); }
-    .aw-row {
-      display: flex; align-items: center; height: 46px;
-      padding: 0 10px 0 13px;
-      border-bottom: 1px solid rgba(255,255,255,0.04);
-    }
-    .aw-ico {
-      width: 28px; height: 28px; border-radius: 7px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px; flex-shrink: 0; margin-right: 10px;
-      position: relative;
-    }
-    .aw-bd {
-      position: absolute; bottom: -2px; right: -2px;
-      width: 9px; height: 9px; border-radius: 50%;
-      border: 2px solid #0d1628;
-    }
-    .g { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,0.65); }
-    .r { background: var(--red); }
-    .aw-info { flex: 1; min-width: 0; }
-    .aw-name { font-size: 12.5px; font-weight: 600; color: #dde4f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .aw-name.dim { color: var(--faint); }
-    .aw-host { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--faint); }
-    .aw-btns { display: flex; gap: 2px; opacity: 0.45; }
-    .aw-btn { width: 22px; height: 22px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #475569; }
-    .aw-btn.stop { color: rgba(239,68,68,0.8); }
-    .aw-btn.start { color: rgba(34,197,94,0.8); }
-    .aw-gdiv { height: 1px; background: rgba(255,255,255,0.06); margin: 3px 0; }
-    .aw-footer {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 9px 13px;
-      border-top: 1px solid rgba(255,255,255,0.07);
-    }
-    .aw-fl { font-size: 10.5px; color: var(--faint); }
-    .aw-fr { font-size: 10.5px; color: rgba(239,68,68,0.45); }
+/* FULL WINDOW MOCKUP */
+.win-section{max-width:1100px;margin:0 auto;padding:80px 40px}
+.win-wrap{border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.1);box-shadow:0 40px 80px rgba(0,0,0,.55);background:#0b1120;position:relative}
+.win-wrap::before{content:'';position:absolute;inset:-1px;border-radius:15px;background:linear-gradient(135deg,rgba(99,102,241,.3),rgba(99,102,241,.08),transparent 60%);z-index:-1}
+.win-chrome{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02)}
+.traffic{display:flex;gap:6px}
+.td{width:11px;height:11px;border-radius:50%}
+.td-r{background:#ff5f57}.td-y{background:#ffbd2e}.td-g{background:#28c941}
+.win-title{flex:1;text-align:center;font-size:12.5px;color:var(--muted)}
+.win-layout{display:grid;grid-template-columns:160px 1fr;min-height:380px}
+.win-sb{border-right:1px solid rgba(255,255,255,.07);padding:10px 0;background:rgba(0,0,0,.15)}
+.win-nav{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:12.5px;color:var(--muted);cursor:pointer;transition:background .12s,color .12s;user-select:none}
+.win-nav:hover{background:rgba(255,255,255,.04);color:var(--text)}
+.win-nav.active{background:rgba(255,255,255,.06);color:var(--text);font-weight:500}
+.win-nav-ico{font-size:14px;width:16px;text-align:center}
+.win-sec-label{font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:10px 14px 4px}
+.win-content{overflow:hidden}
+.win-pane{display:none;height:100%}
+.win-pane.active{display:flex;flex-direction:column}
 
-    /* ── SECTIONS ── */
-    .section { max-width: 1080px; margin: 0 auto; padding: 80px 40px; }
-    .section-tag {
-      font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
-      color: var(--acc2); text-transform: uppercase; margin-bottom: 14px;
-    }
-    h2 { font-size: clamp(24px,3vw,36px); font-weight: 700; letter-spacing: -0.025em; margin-bottom: 14px; }
-    .section-sub { font-size: 17px; color: var(--muted); max-width: 540px; margin-bottom: 48px; }
-    .divider { border: none; border-top: 1px solid var(--border); max-width: 1080px; margin: 0 auto; }
+/* Services pane */
+.stats-bar{display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.06);background:rgba(0,0,0,.1)}
+.stat{text-align:center;padding:0 18px}
+.stat-n{font-size:19px;font-weight:600}
+.stat-l{font-size:11px;color:var(--muted);margin-top:1px}
+.stat-div{width:1px;height:28px;background:rgba(255,255,255,.07)}
+.stats-spacer{flex:1}
+.bulk-btns{display:flex;gap:8px;padding-right:4px}
+.bulk-btn{font-size:11px;border:none;background:none;cursor:pointer;font-family:inherit;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08)}
+.bulk-btn:hover{background:rgba(255,255,255,.06)}
+.win-svc-list{overflow-y:auto;flex:1}
+.win-row{display:flex;align-items:center;height:50px;padding:0 14px 0 12px}
+.win-row:not(:last-child){border-bottom:1px solid rgba(255,255,255,.04)}
+.win-app-ico{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;margin-right:11px;position:relative;border:0.5px solid rgba(255,255,255,.06)}
+.win-svc-info{flex:1;min-width:0}
+.win-svc-name{font-size:13px;font-weight:600;color:#dde4f0;margin-bottom:2px}
+.win-svc-sub{display:flex;align-items:center;gap:6px}
+.win-svc-host{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--faint)}
+.win-svc-badge{font-size:9px;font-weight:500;padding:1px 6px;border-radius:3px;display:flex;align-items:center;gap:3px}
+.win-svc-dot{width:5px;height:5px;border-radius:50%}
+.b-running{background:rgba(34,197,94,.1);color:rgba(34,197,94,.85)}
+.b-stopped{background:rgba(239,68,68,.1);color:rgba(239,68,68,.75)}
+.b-ext{background:rgba(167,139,250,.1);color:rgba(167,139,250,.85)}
+.win-row-btns{display:flex;gap:3px;opacity:.4;transition:opacity .15s}
+.win-row:hover .win-row-btns{opacity:1}
+.win-rbtn{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;transition:background .1s}
+.win-rbtn:hover{background:rgba(255,255,255,.08)}
 
-    /* ── HOW IT WORKS ── */
-    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-    .step {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 14px; padding: 26px 22px;
-    }
-    .step-num {
-      width: 30px; height: 30px; border-radius: 8px;
-      background: rgba(99,102,241,0.12);
-      border: 1px solid rgba(99,102,241,0.28);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 600; color: var(--acc2);
-      margin-bottom: 16px;
-    }
-    .step-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
-    .step-text { font-size: 14px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; }
-    .step-code {
-      background: var(--bg); border: 1px solid var(--border);
-      border-radius: 8px; padding: 11px 13px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11.5px; color: var(--acc2); white-space: pre;
-      overflow-x: auto;
-    }
+/* Agent pane */
+.agent-pane{padding:20px}
+.agent-pane h3{font-size:15px;font-weight:600;margin-bottom:5px}
+.agent-pane .ap-sub{font-size:12.5px;color:var(--muted);margin-bottom:18px}
+.agent-row{display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;margin-bottom:8px}
+.agent-ico{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.agent-txt{flex:1}
+.agent-name-r{font-size:13px;font-weight:500;display:flex;align-items:center;gap:7px}
+.agent-path{font-size:10.5px;color:var(--faint);font-family:'JetBrains Mono',monospace;margin-top:2px}
+.agent-cta{font-size:11px;padding:5px 12px;border-radius:6px;background:rgba(99,102,241,.15);color:var(--acc2);border:none;cursor:pointer;font-family:inherit;white-space:nowrap}
+.agent-cta.done{background:transparent;color:rgba(34,197,94,.7);cursor:default}
 
-    /* ── AGENTS ── */
-    .agents { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-    .agent-card {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 14px; padding: 22px 24px;
-    }
-    .agent-name { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-    .agent-status {
-      font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
-    }
-    .status-works { background: rgba(34,197,94,0.1); color: rgba(34,197,94,0.9); }
-    .status-beta  { background: rgba(245,158,11,0.1); color: rgba(245,158,11,0.9); }
-    .agent-code {
-      background: var(--bg); border: 1px solid var(--border);
-      border-radius: 8px; padding: 13px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px; color: var(--acc2);
-      white-space: pre; overflow-x: auto; line-height: 1.6;
-    }
+/* Discover pane */
+.discover-pane{padding:20px}
+.discover-pane h3{font-size:15px;font-weight:600;margin-bottom:5px}
+.discover-pane .dp-sub{font-size:12.5px;color:var(--muted);margin-bottom:16px}
+.scan-btn{display:flex;align-items:center;gap:6px;font-size:12px;padding:8px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.1);color:var(--text);cursor:pointer;background:rgba(255,255,255,.04);font-family:inherit;margin-bottom:14px;transition:background .12s}
+.scan-btn:hover{background:rgba(255,255,255,.08)}
+.disc-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid rgba(255,255,255,.06);border-radius:8px;margin-bottom:6px;background:rgba(255,255,255,.02)}
+.disc-port{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);background:rgba(255,255,255,.05);padding:2px 7px;border-radius:4px;flex-shrink:0}
+.disc-proc{font-size:11.5px;color:var(--muted);flex:1}
+.disc-input{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:4px 8px;font-size:11.5px;color:var(--text);font-family:inherit;outline:none}
+.disc-input:focus{border-color:var(--accent)}
+.disc-import{font-size:11px;padding:4px 10px;border-radius:5px;background:rgba(99,102,241,.15);color:var(--acc2);border:none;cursor:pointer;font-family:inherit;white-space:nowrap}
+.disc-note{font-size:11px;color:var(--faint);margin-top:8px}
 
-    /* ── COMPARISON ── */
-    .comp-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    thead th {
-      padding: 12px 16px; text-align: left;
-      font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
-      color: var(--faint); text-transform: uppercase;
-      border-bottom: 1px solid var(--border);
-    }
-    thead th.you { color: var(--acc2); }
-    tbody td { padding: 13px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    tbody tr:last-child td { border-bottom: none; }
-    td.you { background: rgba(99,102,241,0.04); }
-    .tool-name { font-weight: 600; }
-    .tool-sub { font-size: 12px; color: var(--faint); margin-top: 2px; }
-    .yes { color: var(--green); font-weight: 500; }
-    .no  { color: var(--faint); }
-    .partial { color: #f59e0b; font-size: 13px; }
+/* EARLY ACCESS */
+.ea-section{background:linear-gradient(to bottom,transparent,rgba(99,102,241,.07),transparent)}
+.ea-inner{max-width:560px;margin:0 auto;padding:72px 40px;text-align:center}
+.ea-inner h2{font-size:clamp(22px,3vw,32px);font-weight:700;letter-spacing:-.025em;margin-bottom:10px}
+.ea-inner p{font-size:16px;color:var(--muted);margin-bottom:28px}
+.ea-price-note{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--amber);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);padding:4px 12px;border-radius:100px;margin-bottom:20px}
+.form-row{display:flex;gap:8px;max-width:420px;margin:0 auto}
+.form-row input{flex:1;padding:12px 16px;border-radius:10px;border:1px solid var(--border2);background:var(--bg2);color:var(--text);font-size:15px;font-family:inherit;outline:none;transition:border-color .15s}
+.form-row input:focus{border-color:var(--accent)}
+.form-row input::placeholder{color:var(--faint)}
+.form-row button{padding:12px 22px;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:500;border:none;cursor:pointer;transition:background .15s;white-space:nowrap;font-family:inherit}
+.form-row button:hover{background:var(--acc2)}
+.form-note{font-size:13px;color:var(--faint);margin-top:12px}
+.form-ok{display:none;color:var(--green);font-size:15px;font-weight:500;margin-top:8px}
 
-    /* ── PRICING ── */
-    .pricing-wrap {
-      max-width: 540px; margin: 0 auto; text-align: center;
-    }
-    .price-card {
-      background: var(--bg2);
-      border: 1px solid rgba(99,102,241,0.35);
-      border-radius: 20px; padding: 44px 40px 36px;
-      position: relative; overflow: hidden;
-    }
-    .price-card::before {
-      content: '';
-      position: absolute; top: 0; left: 0; right: 0; height: 2px;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
-    }
-    .price-badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 12px; border-radius: 100px;
-      background: rgba(245,158,11,0.12);
-      border: 1px solid rgba(245,158,11,0.3);
-      font-size: 11px; font-weight: 600; color: #f59e0b;
-      letter-spacing: 0.04em; text-transform: uppercase;
-      margin-bottom: 20px;
-    }
-    .price-amount {
-      font-size: 64px; font-weight: 700; line-height: 1;
-      letter-spacing: -0.04em; margin-bottom: 6px;
-    }
-    .price-amount sup { font-size: 28px; vertical-align: super; letter-spacing: 0; }
-    .price-desc {
-      font-size: 15px; color: var(--muted); margin-bottom: 28px;
-    }
-    .price-features {
-      list-style: none; margin-bottom: 32px; text-align: left;
-      display: flex; flex-direction: column; gap: 12px;
-    }
-    .price-features li {
-      display: flex; align-items: flex-start; gap: 10px;
-      font-size: 14px; color: var(--muted);
-    }
-    .price-check { color: var(--green); flex-shrink: 0; margin-top: 1px; }
-    .btn-buy {
-      display: block; width: 100%;
-      padding: 15px 24px; border-radius: 12px;
-      background: var(--accent); color: #fff;
-      font-size: 16px; font-weight: 600;
-      transition: background .15s, transform .12s;
-      margin-bottom: 14px;
-    }
-    .btn-buy:hover { background: var(--acc2); transform: translateY(-1px); }
-    .price-refund {
-      font-size: 12.5px; color: var(--faint);
-      line-height: 1.5;
-    }
-    .price-source {
-      margin-top: 16px; font-size: 12px; color: var(--faint);
-    }
-    .price-source a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+/* SECTIONS */
+.section{max-width:1100px;margin:0 auto;padding:80px 40px}
+.divider{border:none;border-top:1px solid var(--border);max-width:1100px;margin:0 auto}
+.stag{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--acc2);text-transform:uppercase;margin-bottom:14px}
+h2{font-size:clamp(24px,3vw,38px);font-weight:700;letter-spacing:-.025em;margin-bottom:14px}
+.sec-sub{font-size:17px;color:var(--muted);max-width:540px;margin-bottom:48px}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.step{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:26px 22px}
+.step-num{width:30px;height:30px;border-radius:8px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.28);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--acc2);margin-bottom:16px}
+.step-title{font-size:15px;font-weight:600;margin-bottom:8px}
+.step-text{font-size:14px;color:var(--muted);line-height:1.6;margin-bottom:14px}
+.step-code{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 13px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--acc2);white-space:pre;overflow-x:auto}
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.feat-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px 20px}
+.feat-ico{font-size:20px;margin-bottom:10px}
+.feat-title{font-size:14px;font-weight:600;margin-bottom:5px}
+.feat-text{font-size:13px;color:var(--muted);line-height:1.55}
 
-    /* ── FOOTER ── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 36px 40px;
-      max-width: 1080px; margin: 0 auto;
-      display: flex; justify-content: space-between; align-items: center;
-      flex-wrap: wrap; gap: 16px;
-    }
-    .footer-logo { font-family: 'JetBrains Mono', monospace; font-size: 15px; color: var(--muted); }
-    .footer-links { display: flex; gap: 24px; }
-    .footer-link { font-size: 14px; color: var(--faint); transition: color .15s; }
-    .footer-link:hover { color: var(--muted); }
+/* FOOTER */
+footer{border-top:1px solid var(--border);padding:36px 40px;max-width:1100px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+.footer-logo{font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--muted)}
+.footer-links{display:flex;gap:24px}
+.footer-link{font-size:14px;color:var(--faint);transition:color .15s}
+.footer-link:hover{color:var(--muted)}
 
-    @media (max-width: 780px) {
-      nav { padding: 0 20px; }
-      .hero { grid-template-columns: 1fr; padding: 60px 20px 40px; gap: 40px; }
-      .steps, .agents { grid-template-columns: 1fr; }
-      .section { padding: 60px 20px; }
-      footer { padding: 28px 20px; flex-direction: column; align-items: flex-start; }
-    }
-  </style>
+@media(max-width:780px){
+  nav{padding:0 20px}
+  .hero{grid-template-columns:1fr;padding:60px 20px 40px;gap:40px}
+  .mac-bar,.pop{width:100%;max-width:360px}
+  .steps,.feat-grid{grid-template-columns:1fr}
+  .section,.win-section{padding:60px 20px}
+  footer{padding:28px 20px;flex-direction:column;align-items:flex-start}
+  .form-row{flex-direction:column}
+  .win-layout{grid-template-columns:1fr}
+  .win-sb{display:none}
+}
+</style>
 </head>
 <body>
 
+<!-- NAV -->
 <nav>
-  <div class="nav-logo">
-    <div class="nav-logo-dot"></div>
-    devkit
-  </div>
+  <div class="nav-logo"><div class="nav-pulse"></div>devkit</div>
   <div class="nav-links">
+    <a href="#app" class="nav-link">The app</a>
     <a href="#how" class="nav-link">How it works</a>
-    <a href="#agents" class="nav-link">Agent setup</a>
     <a href="https://github.com/djadmin/devkit" class="nav-link" target="_blank">GitHub ★</a>
-    <a href="#pricing" class="nav-cta">Get Early Access $29 →</a>
+    <a href="#early-access" class="nav-cta">Get early access →</a>
   </div>
 </nav>
 
 <!-- HERO -->
-<section style="background: radial-gradient(ellipse 70% 50% at 50% -5%, rgba(99,102,241,0.14) 0%, transparent 60%);">
+<section style="background:radial-gradient(ellipse 70% 50% at 50% -5%,rgba(99,102,241,.14) 0%,transparent 60%)">
   <div class="hero">
     <div>
-      <div class="badge">
-        <div class="badge-pip"></div>
-        Early Access · $29 · Lifetime updates
-      </div>
-      <h1>The home for every<br>local app your AI <em>builds.</em></h1>
-      <p class="hero-sub">
-        If Claude, Cursor, or Codex keeps leaving you with a pile of localhost ports, devkit turns them into named apps you can reopen, route, and control from one place.
-      </p>
+      <div class="badge"><div class="badge-pip"></div>Alpha · Free for testers · macOS 14+</div>
+      <h1>Every app your AI<br>builds, <em>auto-tracked.</em></h1>
+      <p class="hero-sub">One line in your AI agent's config. Every project gets a <code>.localhost</code> URL and appears in your menu bar — automatically. Works with Claude Code, Cursor, Codex, and more.</p>
       <div class="hero-actions">
-        <a href="#pricing" class="btn-primary">Get Early Access — $29</a>
+        <a href="#early-access" class="btn-primary">Get early access</a>
         <a href="https://github.com/djadmin/devkit" class="btn-ghost" target="_blank">View on GitHub</a>
       </div>
-      <p style="margin-top:16px;font-size:13px;color:var(--faint);">macOS 14+ · Apple Silicon &amp; Intel · Lifetime updates · 30-day refund</p>
+      <p class="hero-meta">macOS 14+ · Apple Silicon &amp; Intel · Free for alpha testers</p>
     </div>
 
-    <div class="mockup">
-      <div class="app-window">
-        <div class="aw-header">
-          <div class="aw-bar"></div>
-          <div class="aw-title-wrap">
-            <div class="aw-title">devkit</div>
-            <div class="aw-sub"><div class="aw-sub-dot"></div>7 of 9 running</div>
+    <!-- INTERACTIVE MENU BAR DEMO -->
+    <div class="demo-wrap">
+      <div class="live-chip"><div class="live-dot"></div>interactive demo</div>
+      <div class="mac-bar">
+        <div class="mac-bar-grp"><span style="opacity:.4">✦</span><span style="opacity:.4">◎</span><span style="opacity:.4">⊛</span></div>
+        <div class="mb-btn" onclick="openWin()">⊞ devkit <span class="mb-badge" id="mb-cnt">7</span></div>
+        <div class="mac-bar-grp"><span style="opacity:.4">◎</span><span style="opacity:.4">⊙</span></div>
+      </div>
+      <div class="pop" id="pop">
+        <div class="pop-hdr">
+          <div class="pop-bar"></div>
+          <div class="pop-title-w">
+            <div class="pop-title">devkit</div>
+            <div class="pop-sub"><div class="pop-sdot" id="fl-dot" style="background:var(--amber)"></div><span id="fl-lbl">7 of 9 running</span></div>
           </div>
-          <div class="aw-reload">↺</div>
+          <span style="font-size:14px;color:var(--faint);cursor:pointer;user-select:none" onclick="doReload(this)">↺</span>
         </div>
-        <div class="aw-search">⌕ Filter apps…</div>
-        <div class="aw-sec"><span class="aw-sec-lbl">Running · 7</span><span class="aw-sec-act-r">Stop All</span></div>
-        <div class="aw-row">
-          <div class="aw-ico" style="background:#4f46e5">🚀<div class="aw-bd g"></div></div>
-          <div class="aw-info"><div class="aw-name">nova</div><div class="aw-host">nova.localhost:3000</div></div>
-          <div class="aw-btns"><div class="aw-btn">⎘</div><div class="aw-btn">↗</div><div class="aw-btn stop">■</div></div>
+        <div class="pop-srch">⌕ Filter apps…</div>
+        <div class="pop-sec">
+          <span class="pop-slbl">Running · <span id="run-n">7</span></span>
+          <span class="pop-sact" style="color:rgba(239,68,68,.6)" onclick="stopAll()">Stop All</span>
         </div>
-        <div class="aw-row">
-          <div class="aw-ico" style="background:#b45309">⚡<div class="aw-bd g"></div></div>
-          <div class="aw-info"><div class="aw-name">forge</div><div class="aw-host">forge.localhost:4000</div></div>
-          <div class="aw-btns"><div class="aw-btn">⎘</div><div class="aw-btn">↗</div><div class="aw-btn stop">■</div></div>
+        <div id="rows-r"></div>
+        <div class="pop-gdiv"></div>
+        <div class="pop-sec">
+          <span class="pop-slbl">Stopped · <span id="stp-n">2</span></span>
+          <span class="pop-sact" style="color:rgba(34,197,94,.6)" onclick="startAll()">Start All</span>
         </div>
-        <div class="aw-row">
-          <div class="aw-ico" style="background:#0369a1">🌐<div class="aw-bd g"></div></div>
-          <div class="aw-info"><div class="aw-name">orbit</div><div class="aw-host">orbit.localhost:8080</div></div>
-          <div class="aw-btns"><div class="aw-btn">⎘</div><div class="aw-btn">↗</div><div class="aw-btn stop">■</div></div>
-        </div>
-        <div class="aw-row">
-          <div class="aw-ico" style="background:#6d28d9">🎨<div class="aw-bd g"></div></div>
-          <div class="aw-info"><div class="aw-name">studio</div><div class="aw-host">studio.localhost:5173</div></div>
-          <div class="aw-btns"><div class="aw-btn">⎘</div><div class="aw-btn">↗</div><div class="aw-btn stop">■</div></div>
-        </div>
-        <div class="aw-gdiv"></div>
-        <div class="aw-sec"><span class="aw-sec-lbl">Stopped · 2</span><span class="aw-sec-act-g">Start All</span></div>
-        <div class="aw-row">
-          <div class="aw-ico" style="background:#1c2240;font-size:13px">💎<div class="aw-bd r"></div></div>
-          <div class="aw-info"><div class="aw-name dim">prism</div><div class="aw-host">prism.localhost:6001</div></div>
-          <div class="aw-btns"><div class="aw-btn">⎘</div><div class="aw-btn">↗</div><div class="aw-btn start">▶</div></div>
-        </div>
-        <div class="aw-footer">
-          <span class="aw-fl">⊞ Dashboard</span>
-          <span class="aw-fr">⏻ Quit</span>
+        <div id="rows-s"></div>
+        <div class="pop-foot">
+          <div class="pop-fl" onclick="openWin()">⊞ Open devkit</div>
+          <div class="pop-fr">⏻ Quit</div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<hr class="divider" />
+<hr class="divider"/>
+
+<!-- FULL APP WINDOW -->
+<section class="win-section" id="app">
+  <div class="stag" style="text-align:center">The full Mac app</div>
+  <h2 style="text-align:center;margin-bottom:8px">More than a menu bar.</h2>
+  <p style="text-align:center;color:var(--muted);margin-bottom:32px;font-size:16px">Click the tabs — manage services, configure your AI agent, and discover running ports all in one window.</p>
+
+  <div class="win-wrap">
+    <div class="win-chrome">
+      <div class="traffic"><div class="td td-r"></div><div class="td td-y"></div><div class="td td-g"></div></div>
+      <div class="win-title">devkit</div>
+      <div style="width:52px"></div>
+    </div>
+
+    <div class="win-layout">
+      <!-- sidebar -->
+      <div class="win-sb">
+        <div class="win-nav active" id="sb-svc" onclick="switchPane('svc')">
+          <span class="win-nav-ico">⊞</span>Services
+        </div>
+        <div class="win-nav" id="sb-agt" onclick="switchPane('agt')">
+          <span class="win-nav-ico">✦</span>Agent setup
+        </div>
+        <div class="win-nav" id="sb-disc" onclick="switchPane('disc')">
+          <span class="win-nav-ico">◎</span>Discover
+        </div>
+        <div class="win-sec-label">Info</div>
+        <div class="win-nav" id="sb-log" onclick="switchPane('log')">
+          <span class="win-nav-ico">📄</span>Logs
+        </div>
+      </div>
+
+      <!-- SERVICES PANE -->
+      <div class="win-pane active" id="pane-svc">
+        <div class="stats-bar">
+          <div class="stat"><div class="stat-n" style="color:var(--green)" id="w-run">7</div><div class="stat-l">Running</div></div>
+          <div class="stat-div"></div>
+          <div class="stat"><div class="stat-n" style="color:var(--red)" id="w-stp">2</div><div class="stat-l">Stopped</div></div>
+          <div class="stat-div"></div>
+          <div class="stat"><div class="stat-n">9</div><div class="stat-l">Registered</div></div>
+          <div class="stats-spacer"></div>
+          <div class="bulk-btns">
+            <button class="bulk-btn" style="color:rgba(34,197,94,.8)" onclick="startAll();syncWin()">Start All</button>
+            <button class="bulk-btn" style="color:rgba(239,68,68,.7)" onclick="stopAll();syncWin()">Stop All</button>
+          </div>
+        </div>
+        <div class="win-svc-list" id="win-rows"></div>
+      </div>
+
+      <!-- AGENT SETUP PANE -->
+      <div class="win-pane" id="pane-agt">
+        <div class="agent-pane">
+          <h3>Agent setup</h3>
+          <p class="ap-sub">devkit detects which AI agents are installed and patches config files directly — no copy-paste needed.</p>
+          <div class="agent-row">
+            <div class="agent-ico" style="background:rgba(99,102,241,.12)">✦</div>
+            <div class="agent-txt">
+              <div class="agent-name-r">Claude Code <span class="win-svc-badge b-running" style="font-size:10px">Configured</span></div>
+              <div class="agent-path">~/.claude/CLAUDE.md · devkit block found</div>
+            </div>
+            <button class="agent-cta done">✓ Done</button>
+          </div>
+          <div class="agent-row">
+            <div class="agent-ico" style="background:rgba(245,158,11,.1)">⌥</div>
+            <div class="agent-txt">
+              <div class="agent-name-r">Cursor <span class="win-svc-badge" style="background:rgba(245,158,11,.1);color:rgba(245,158,11,.85);font-size:10px">Not configured</span></div>
+              <div class="agent-path">~/.cursor/rules/devkit.mdc</div>
+            </div>
+            <button class="agent-cta" onclick="this.textContent='✓ Added';this.className='agent-cta done'">Add snippet →</button>
+          </div>
+          <div class="agent-row">
+            <div class="agent-ico" style="background:rgba(255,255,255,.04)">⬡</div>
+            <div class="agent-txt">
+              <div class="agent-name-r">OpenAI Codex <span class="win-svc-badge" style="background:rgba(255,255,255,.05);color:var(--muted);font-size:10px">Not found</span></div>
+              <div class="agent-path">~/.codex/ · not installed</div>
+            </div>
+            <button class="agent-cta" style="color:var(--faint);background:transparent" disabled>Skip</button>
+          </div>
+          <div class="agent-row">
+            <div class="agent-ico" style="background:rgba(167,139,250,.1)">⊛</div>
+            <div class="agent-txt">
+              <div class="agent-name-r">Windsurf <span class="win-svc-badge" style="background:rgba(255,255,255,.05);color:var(--muted);font-size:10px">Not found</span></div>
+              <div class="agent-path">~/.codeium/windsurf/ · not installed</div>
+            </div>
+            <button class="agent-cta" style="color:var(--faint);background:transparent" disabled>Skip</button>
+          </div>
+          <p style="font-size:11.5px;color:var(--faint);margin-top:12px;line-height:1.5">After setup, every app your agent builds registers here automatically — no extra steps.</p>
+        </div>
+      </div>
+
+      <!-- DISCOVER PANE -->
+      <div class="win-pane" id="pane-disc">
+        <div class="discover-pane">
+          <h3>Discover running services</h3>
+          <p class="dp-sub">Found 3 processes listening on ports not yet registered in devkit.</p>
+          <button class="scan-btn">◎ Scan again</button>
+          <div class="disc-row">
+            <div style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 5px rgba(34,197,94,.6);flex-shrink:0"></div>
+            <div class="disc-port">:5173</div>
+            <div class="disc-proc">node · vite</div>
+            <input class="disc-input" value="frontend-ui" placeholder="name this app…"/>
+            <button class="disc-import">Import</button>
+          </div>
+          <div class="disc-row">
+            <div style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 5px rgba(34,197,94,.6);flex-shrink:0"></div>
+            <div class="disc-port">:8000</div>
+            <div class="disc-proc">python3 · uvicorn</div>
+            <input class="disc-input" value="" placeholder="name this app…"/>
+            <button class="disc-import">Import</button>
+          </div>
+          <div class="disc-row">
+            <div style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 5px rgba(34,197,94,.6);flex-shrink:0"></div>
+            <div class="disc-port">:3001</div>
+            <div class="disc-proc">node · express</div>
+            <input class="disc-input" value="relay-api" placeholder="name this app…"/>
+            <button class="disc-import">Import</button>
+          </div>
+          <p class="disc-note">9 services already registered · excluded from scan</p>
+        </div>
+      </div>
+
+      <!-- LOGS PANE -->
+      <div class="win-pane" id="pane-log">
+        <div style="padding:20px">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:5px">Logs</h3>
+          <p style="font-size:12.5px;color:var(--muted);margin-bottom:16px">Tail any service's log file — auto-refreshes every 2 seconds.</p>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--acc2);line-height:1.7">
+            <span style="color:var(--faint)">[2026-06-08 14:32:01]</span> nova ready on port 3000<br>
+            <span style="color:var(--faint)">[2026-06-08 14:32:01]</span> <span style="color:var(--green)">✓ Server started</span><br>
+            <span style="color:var(--faint)">[2026-06-08 14:32:08]</span> GET /api/apps 200 12ms<br>
+            <span style="color:var(--faint)">[2026-06-08 14:32:11]</span> GET /api/status 200 3ms<br>
+            <span style="color:var(--faint)">[2026-06-08 14:32:19]</span> POST /api/register 201 8ms<br>
+            <span style="color:var(--faint)">[2026-06-08 14:32:22]</span> GET /api/apps 200 11ms<br>
+            <span id="log-cursor" style="color:var(--acc2)">▌</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
 
 <!-- HOW IT WORKS -->
 <section class="section" id="how">
-  <div class="section-tag">How it works</div>
-  <h2>Start with the mess you already have.</h2>
-  <p class="section-sub">Track existing running apps today, then let future AI-built projects land here automatically.</p>
+  <div class="stag">How it works</div>
+  <h2>Wire your agent once. Done forever.</h2>
+  <p class="sec-sub">Every app your agent builds after that registers itself automatically.</p>
   <div class="steps">
     <div class="step">
       <div class="step-num">1</div>
-      <div class="step-title">Install and bootstrap</div>
-      <div class="step-text">Install the CLI, menu bar app, and local proxy once.</div>
+      <div class="step-title">Install devkit</div>
+      <div class="step-text">CLI and menu bar app via Homebrew. Bootstrap wires up Caddy for <code>.localhost</code> routing.</div>
       <div class="step-code">brew tap djadmin/tap
+brew install devkit
 brew install --cask devkit
 devkit bootstrap</div>
     </div>
     <div class="step">
       <div class="step-num">2</div>
-      <div class="step-title">Track or auto-register</div>
-      <div class="step-text">Bring already-running apps into devkit now, or add one rule so future apps register themselves.</div>
-      <div class="step-code">devkit register atlas --port 7780
-  --managed-by external
-
-devkit register &lt;slug&gt; --port &lt;port&gt;
-  --cmd "&lt;start-cmd&gt;"</div>
-    </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <div class="step-title">Reopen from one place</div>
-      <div class="step-text">Every app gets a stable name, URL, and place you can come back to later.</div>
-      <div class="step-code">nova.localhost   🟢 running
-forge.localhost  🟢 running
-orbit.localhost  🔴 stopped</div>
-    </div>
-  </div>
-</section>
-
-<hr class="divider" />
-
-<!-- AGENT SETUP -->
-<section class="section" id="agents">
-  <div class="section-tag">Agent setup</div>
-  <h2>One rule to your agent. Less localhost entropy forever.</h2>
-  <p class="section-sub">Claude Code is the most mature path today, but the same pattern works across Cursor, Codex, and other agent-driven workflows.</p>
-  <div class="agents">
-    <div class="agent-card">
-      <div class="agent-name">Claude Code <span class="agent-status status-works">Working</span></div>
-      <div class="agent-code"><!-- ~/.claude/CLAUDE.md -->
+      <div class="step-title">Add one line to your agent</div>
+      <div class="step-text">Drop the snippet into your global agent config. The in-app Agent Setup tab does this automatically.</div>
+      <div class="step-code"># ~/.claude/CLAUDE.md
 After creating any web app:
 devkit register &lt;name&gt; \
   --port &lt;port&gt; \
   --cmd "&lt;start-cmd&gt;"</div>
     </div>
-    <div class="agent-card">
-      <div class="agent-name">Cursor <span class="agent-status status-beta">Beta</span></div>
-      <div class="agent-code"><!-- .cursor/rules/devkit.mdc -->
----
-alwaysApply: true
----
-After creating any web app:
-devkit register &lt;name&gt;
-  --port &lt;port&gt;</div>
-    </div>
-    <div class="agent-card">
-      <div class="agent-name">OpenAI Codex <span class="agent-status status-beta">Beta</span></div>
-      <div class="agent-code"><!-- ~/.codex/AGENTS.md -->
-After creating any web app:
-devkit register &lt;name&gt; \
-  --port &lt;port&gt;</div>
-    </div>
-    <div class="agent-card">
-      <div class="agent-name">Manual or mixed workflow</div>
-      <div class="agent-code"><!-- Register manually anytime -->
-devkit register my-api \
-  --port 3000 \
-  --cmd "npm run dev"</div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-title">Build. It appears.</div>
+      <div class="step-text">Every new project auto-registers in your menu bar. Stable URL, lifecycle control, logs — no extra steps.</div>
+      <div class="step-code">nova.localhost    🟢 running
+forge.localhost   🟢 running
+orbit.localhost   🔴 stopped
+beacon.localhost  🟢 running</div>
     </div>
   </div>
-  <p style="margin-top:20px;font-size:14px;color:var(--muted);">Full setup guide → <a href="https://github.com/djadmin/devkit/blob/main/MenuBarApp/docs/agent-setup.md" style="color:var(--acc2)">docs/agent-setup.md</a></p>
 </section>
 
-<hr class="divider" />
+<hr class="divider"/>
 
-<!-- COMPARISON -->
+<!-- FEATURES -->
 <section class="section">
-  <div class="section-tag">Why devkit</div>
-  <h2>It solves the part other local tools leave behind.</h2>
-  <p class="section-sub">Most alternatives solve routing or process running. devkit is about remembering, reopening, and controlling the long tail of local apps your AI keeps creating.</p>
-  <div class="comp-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Tool</th>
-          <th class="you">devkit</th>
-          <th>Port proxy</th>
-          <th>Procfile runner</th>
-          <th>Shell scripts</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><div class="tool-name">Stable `.localhost` URLs</div></td>
-          <td class="you"><span class="yes">✓</span></td>
-          <td><span class="yes">✓</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="no">✗</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Start / stop lifecycle</div></td>
-          <td class="you"><span class="yes">✓ safe restart flow</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="partial">Per project</span></td>
-          <td><span class="partial">Ad hoc</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Remember app path + command</div></td>
-          <td class="you"><span class="yes">✓ registry</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="partial">Project-local only</span></td>
-          <td><span class="no">✗</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Agent integration</div><div class="tool-sub">Auto-register on build</div></td>
-          <td class="you"><span class="yes">✓ core feature</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="no">✗</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Existing app discovery</div><div class="tool-sub">Track what is already running</div></td>
-          <td class="you"><span class="yes">✓ Track All</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="no">✗</span></td>
-          <td><span class="no">✗</span></td>
-        </tr>
-        <tr>
-          <td><div class="tool-name">Single place for many projects</div><div class="tool-sub">One shelf for your local apps</div></td>
-          <td class="you"><span class="yes">✓</span></td>
-          <td><span class="partial">Routing only</span></td>
-          <td><span class="partial">Per repo</span></td>
-          <td><span class="no">✗</span></td>
-        </tr>
-      </tbody>
-    </table>
+  <div class="stag">Features</div>
+  <h2>Everything in one place.</h2>
+  <p class="sec-sub">Menu bar for quick status. Full window for everything else.</p>
+  <div class="feat-grid">
+    <div class="feat-card"><div class="feat-ico">⊞</div><div class="feat-title">Menu bar status</div><div class="feat-text">Running count badge. Fleet health dot. Start, stop, copy URL — without opening anything.</div></div>
+    <div class="feat-card"><div class="feat-ico">✦</div><div class="feat-title">Agent setup</div><div class="feat-text">Detects Claude Code, Cursor, Codex, Windsurf. Patches config files directly — one click, no copy-paste.</div></div>
+    <div class="feat-card"><div class="feat-ico">◎</div><div class="feat-title">Discover &amp; import</div><div class="feat-text">Scans running TCP ports, resolves process names, lets you name and import in one click.</div></div>
+    <div class="feat-card"><div class="feat-ico">⚡</div><div class="feat-title">Real stop/start</div><div class="feat-text">Process tree kill — terminates children too. Waits for the port to clear before confirming.</div></div>
+    <div class="feat-card"><div class="feat-ico">📄</div><div class="feat-title">Live logs</div><div class="feat-text">Tail any service's log file from the app. Auto-refreshes every 2 seconds. No terminal needed.</div></div>
+    <div class="feat-card"><div class="feat-ico">⚙</div><div class="feat-title">.localhost proxy</div><div class="feat-text">Every app gets a clean <code>name.localhost</code> URL via Caddy. No editing <code>/etc/hosts</code>.</div></div>
   </div>
 </section>
 
-<hr class="divider" />
+<hr class="divider"/>
 
-<!-- PRICING -->
-<section class="section" id="pricing">
-  <div class="section-tag">Pricing</div>
-  <h2>One price. No subscriptions.</h2>
-  <p class="section-sub">Pay once, use forever. Every future release included.</p>
-  <div class="pricing-wrap">
-    <div class="price-card">
-      <div class="price-badge">⚡ Early Access — Founder's Price</div>
-      <div class="price-amount"><sup>$</sup>29</div>
-      <p class="price-desc">One-time · Lifetime updates included</p>
-      <ul class="price-features">
-        <li><span class="price-check">✓</span> CLI + macOS menu bar app + full Mac window</li>
-        <li><span class="price-check">✓</span> Every future version, forever — no subscription</li>
-        <li><span class="price-check">✓</span> Works with Claude Code, Cursor, Codex, Copilot, Windsurf</li>
-        <li><span class="price-check">✓</span> Source on GitHub (MIT) — you keep it either way</li>
-      </ul>
-      <a href="#" class="btn-buy" id="buy-btn">Get Early Access — $29 →</a>
-      <p class="price-refund">30-day no-questions refund if it doesn't work for you.</p>
-      <p class="price-source">Prefer to build from source? <a href="https://github.com/djadmin/devkit">GitHub →</a></p>
-    </div>
+<!-- EARLY ACCESS -->
+<section class="ea-section" id="early-access">
+  <div class="ea-inner">
+    <div class="ea-price-note">⚡ Will be $29 at launch — free for alpha testers</div>
+    <h2>Get early access</h2>
+    <p>devkit is in alpha. Join the list and you'll get install instructions, direct access to report issues, and a free license when we launch.</p>
+    <form class="form-row" id="ea-form" onsubmit="doSignup(event)">
+      <input type="email" placeholder="you@domain.com" required autocomplete="email"/>
+      <button type="submit">Join waitlist</button>
+    </form>
+    <p class="form-ok" id="ea-ok">✓ You're on the list — watch for an email with install instructions.</p>
+    <p class="form-note">macOS 14+ · No spam · Unsubscribe any time</p>
   </div>
 </section>
 
-<hr class="divider" />
+<hr class="divider"/>
 
 <!-- FOOTER -->
 <footer>
@@ -615,8 +511,120 @@ devkit register my-api \
     <a href="https://github.com/djadmin/devkit/blob/main/MenuBarApp/CHANGELOG.md" class="footer-link">Changelog</a>
     <a href="https://github.com/djadmin/devkit/issues" class="footer-link">Issues</a>
   </div>
-  <span style="font-size:13px;color:var(--faint);">MIT License · macOS 14+</span>
+  <span style="font-size:13px;color:var(--faint)">MIT License · macOS 14+</span>
 </footer>
 
+<script>
+const APPS = [
+  {name:"nova",     host:"nova.localhost",    port:3000, color:"#4f46e5", ico:"🚀", run:true },
+  {name:"forge",    host:"forge.localhost",   port:4000, color:"#b45309", ico:"⚡",  run:true },
+  {name:"orbit",    host:"orbit.localhost",   port:8080, color:"#0369a1", ico:"🌐",  run:true },
+  {name:"beacon",   host:"beacon.localhost",  port:9000, color:"#0e7490", ico:"🔭",  run:true },
+  {name:"relay",    host:"relay.localhost",   port:3001, color:"#15803d", ico:"🌿",  run:true },
+  {name:"studio",   host:"studio.localhost",  port:5173, color:"#6d28d9", ico:"🎨",  run:true },
+  {name:"nexus",    host:"nexus.localhost",   port:4200, color:"#9d174d", ico:"🔮",  run:true },
+  {name:"prism",    host:"prism.localhost",   port:6001, color:"#1c2240", ico:"💎",  run:false},
+  {name:"pulse",    host:"pulse.localhost",   port:7001, color:"#1c2240", ico:"◎",   run:false},
+];
+
+function rn(){return APPS.filter(a=>a.run)}
+function sn(){return APPS.filter(a=>!a.run)}
+
+function appRow(a,mini=true){
+  const sz=mini?27:34;
+  const ico=`<div style="width:${sz}px;height:${sz}px;border-radius:7px;background:${a.run?a.color+'22':'#1a2340'};color:${a.run?a.color:'#3d5070'};display:flex;align-items:center;justify-content:center;font-size:${mini?13:14}px;flex-shrink:0;margin-right:${mini?10:11}px;position:relative">
+    ${a.ico}
+    <div style="position:absolute;bottom:-2px;right:-2px;width:9px;height:9px;border-radius:50%;border:2.5px solid ${mini?'rgba(11,18,34,.97)':'#0b1120'};background:${a.run?'var(--green)':'var(--red)'};${a.run?'box-shadow:0 0 6px rgba(34,197,94,.7)':''}"></div>
+  </div>`;
+  if(mini){
+    return `<div class="pop-row">
+      ${ico}
+      <div class="pop-info"><div class="pop-name ${a.run?'':'dim'}">${a.name}</div><div class="pop-host">${a.host}:${a.port}</div></div>
+      <div class="pop-btns">
+        <div class="pop-btn">⎘</div><div class="pop-btn">↗</div>
+        <div class="pop-btn ${a.run?'stp':'ply'}" onclick="toggle('${a.name}')">${a.run?'■':'▶'}</div>
+      </div>
+    </div>`;
+  } else {
+    const badge=a.run
+      ?`<span class="win-svc-badge b-running"><span style="width:5px;height:5px;border-radius:50%;background:var(--green)"></span>running</span>`
+      :`<span class="win-svc-badge b-stopped">stopped</span>`;
+    return `<div class="win-row">
+      ${ico}
+      <div class="win-svc-info">
+        <div class="win-svc-name">${a.name}</div>
+        <div class="win-svc-sub"><div class="win-svc-host">${a.host}:${a.port}</div>${badge}</div>
+      </div>
+      <div class="win-row-btns">
+        <div class="win-rbtn">⎘</div><div class="win-rbtn">↗</div>
+        <div class="win-rbtn" style="color:${a.run?'rgba(239,68,68,.8)':'rgba(34,197,94,.8)'}" onclick="toggle('${a.name}');syncWin()">${a.run?'■':'▶'}</div>
+      </div>
+    </div>`;
+  }
+}
+
+function render(){
+  const r=rn(),s=sn();
+  document.getElementById('rows-r').innerHTML=r.map(a=>appRow(a,true)).join('');
+  document.getElementById('rows-s').innerHTML=s.map(a=>appRow(a,true)).join('');
+  document.getElementById('run-n').textContent=r.length;
+  document.getElementById('stp-n').textContent=s.length;
+  document.getElementById('mb-cnt').textContent=r.length;
+  const dot=document.getElementById('fl-dot');
+  const lbl=document.getElementById('fl-lbl');
+  dot.style.background=r.length===APPS.length?'var(--green)':r.length===0?'var(--red)':'var(--amber)';
+  lbl.textContent=`${r.length} of ${APPS.length} running`;
+}
+
+function syncWin(){
+  const r=rn(),s=sn();
+  document.getElementById('win-rows').innerHTML=APPS.map(a=>appRow(a,false)).join('');
+  document.getElementById('w-run').textContent=r.length;
+  document.getElementById('w-stp').textContent=s.length;
+}
+
+function toggle(n){const a=APPS.find(x=>x.name===n);if(a){a.run=!a.run;render();syncWin();}}
+function stopAll(){APPS.forEach(a=>a.run=false);render();syncWin();}
+function startAll(){APPS.forEach(a=>a.run=true);render();syncWin();}
+
+function doReload(el){
+  el.style.transition='transform .5s';el.style.transform='rotate(360deg)';
+  setTimeout(()=>{el.style.transform='';el.style.transition='';},550);
+}
+
+function openWin(){
+  document.getElementById('app').scrollIntoView({behavior:'smooth'});
+  switchPane('svc');
+}
+
+function switchPane(id){
+  ['svc','agt','disc','log'].forEach(p=>{
+    document.getElementById('pane-'+p).classList.toggle('active',p===id);
+    document.getElementById('sb-'+p).classList.toggle('active',p===id);
+  });
+}
+
+function doSignup(e){
+  e.preventDefault();
+  document.getElementById('ea-form').style.display='none';
+  document.getElementById('ea-ok').style.display='block';
+}
+
+setInterval(()=>{
+  const r=rn();
+  if(r.length>2){
+    const pick=r[Math.floor(Math.random()*r.length)];
+    pick.run=false;render();syncWin();
+    setTimeout(()=>{pick.run=true;render();syncWin();},1800);
+  }
+},4000);
+
+setInterval(()=>{
+  const c=document.getElementById('log-cursor');
+  if(c)c.style.opacity=c.style.opacity==='0'?'1':'0';
+},600);
+
+render();syncWin();
+</script>
 </body>
 </html>
