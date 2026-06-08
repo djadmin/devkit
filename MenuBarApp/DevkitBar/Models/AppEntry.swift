@@ -1,6 +1,6 @@
 import Foundation
 
-struct AppEntry: Codable, Identifiable, Equatable {
+struct AppEntry: Codable, Identifiable, Equatable, Hashable {
     let name: String
     let hostname: String
     let port: Int

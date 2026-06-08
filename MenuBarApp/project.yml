@@ -29,3 +29,18 @@ targets:
         DEVELOPMENT_TEAM: ""
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         PRODUCT_NAME: DevkitBar
+
+  DevkitBarTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: DevkitBarTests
+    dependencies:
+      - target: DevkitBar
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.devkit.menubar.tests
+        INFOPLIST_FILE: DevkitBarTests/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
