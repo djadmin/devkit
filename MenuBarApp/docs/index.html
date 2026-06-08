@@ -604,8 +604,19 @@ function switchPane(id){
   });
 }
 
-function doSignup(e){
+async function doSignup(e){
   e.preventDefault();
+  const email = e.target.querySelector('input[type="email"]').value;
+  const btn = e.target.querySelector('button');
+  btn.textContent = 'Joining…';
+  btn.disabled = true;
+  try {
+    await fetch('https://app.loops.so/api/newsletter-form/cmpo0fcia1jv00jy4i0qdlsbr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ email, userGroup: 'devkit', site: 'devkit' }),
+    });
+  } catch {}
   document.getElementById('ea-form').style.display='none';
   document.getElementById('ea-ok').style.display='block';
 }
