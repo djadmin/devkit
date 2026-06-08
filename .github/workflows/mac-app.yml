@@ -27,17 +27,19 @@ jobs:
       - name: Build
         working-directory: MenuBarApp
         run: |
+          set -o pipefail
           xcodebuild \
             -scheme DevkitBar \
             -configuration Debug \
             -project DevkitBar.xcodeproj \
             build \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | grep -E "error:|Build succeeded|Build FAILED"
+            2>&1 | grep -E "error:|BUILD SUCCEEDED|BUILD FAILED"
 
       - name: Test
         working-directory: MenuBarApp
         run: |
+          set -o pipefail
           xcodebuild test \
             -scheme DevkitBarTests \
             -project DevkitBar.xcodeproj \
