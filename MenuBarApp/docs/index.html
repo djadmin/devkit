@@ -6,7 +6,7 @@
   <title>devkit — The home for every local app your AI builds.</title>
   <meta name="description" content="devkit gives every local app your AI builds a stable name, .localhost URL, and one place to reopen or control it on macOS." />
   <meta property="og:title" content="devkit" />
-  <meta property="og:description" content="The home for every local app your AI builds. Open source macOS app and CLI." />
+  <meta property="og:description" content="The home for every local app your AI builds. $29 early access — lifetime updates, 30-day refund." />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
@@ -269,6 +269,65 @@
     .no  { color: var(--faint); }
     .partial { color: #f59e0b; font-size: 13px; }
 
+    /* ── PRICING ── */
+    .pricing-wrap {
+      max-width: 540px; margin: 0 auto; text-align: center;
+    }
+    .price-card {
+      background: var(--bg2);
+      border: 1px solid rgba(99,102,241,0.35);
+      border-radius: 20px; padding: 44px 40px 36px;
+      position: relative; overflow: hidden;
+    }
+    .price-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+    .price-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 100px;
+      background: rgba(245,158,11,0.12);
+      border: 1px solid rgba(245,158,11,0.3);
+      font-size: 11px; font-weight: 600; color: #f59e0b;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+    .price-amount {
+      font-size: 64px; font-weight: 700; line-height: 1;
+      letter-spacing: -0.04em; margin-bottom: 6px;
+    }
+    .price-amount sup { font-size: 28px; vertical-align: super; letter-spacing: 0; }
+    .price-desc {
+      font-size: 15px; color: var(--muted); margin-bottom: 28px;
+    }
+    .price-features {
+      list-style: none; margin-bottom: 32px; text-align: left;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .price-features li {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 14px; color: var(--muted);
+    }
+    .price-check { color: var(--green); flex-shrink: 0; margin-top: 1px; }
+    .btn-buy {
+      display: block; width: 100%;
+      padding: 15px 24px; border-radius: 12px;
+      background: var(--accent); color: #fff;
+      font-size: 16px; font-weight: 600;
+      transition: background .15s, transform .12s;
+      margin-bottom: 14px;
+    }
+    .btn-buy:hover { background: var(--acc2); transform: translateY(-1px); }
+    .price-refund {
+      font-size: 12.5px; color: var(--faint);
+      line-height: 1.5;
+    }
+    .price-source {
+      margin-top: 16px; font-size: 12px; color: var(--faint);
+    }
+    .price-source a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+
     /* ── FOOTER ── */
     footer {
       border-top: 1px solid var(--border);
@@ -302,7 +361,7 @@
     <a href="#how" class="nav-link">How it works</a>
     <a href="#agents" class="nav-link">Agent setup</a>
     <a href="https://github.com/djadmin/devkit" class="nav-link" target="_blank">GitHub ★</a>
-    <a href="https://github.com/djadmin/devkit/releases" class="nav-cta">Download →</a>
+    <a href="#pricing" class="nav-cta">Get Early Access $29 →</a>
   </div>
 </nav>
 
@@ -312,17 +371,17 @@
     <div>
       <div class="badge">
         <div class="badge-pip"></div>
-        Public beta · Open source · MIT
+        Early Access · $29 · Lifetime updates
       </div>
       <h1>The home for every<br>local app your AI <em>builds.</em></h1>
       <p class="hero-sub">
         If Claude, Cursor, or Codex keeps leaving you with a pile of localhost ports, devkit turns them into named apps you can reopen, route, and control from one place.
       </p>
       <div class="hero-actions">
-        <a href="https://github.com/djadmin/devkit/releases" class="btn-primary">Download for Mac</a>
+        <a href="#pricing" class="btn-primary">Get Early Access — $29</a>
         <a href="https://github.com/djadmin/devkit" class="btn-ghost" target="_blank">View on GitHub</a>
       </div>
-      <p style="margin-top:16px;font-size:13px;color:var(--faint);">macOS 14+ · Apple Silicon &amp; Intel · Free</p>
+      <p style="margin-top:16px;font-size:13px;color:var(--faint);">macOS 14+ · Apple Silicon &amp; Intel · Lifetime updates · 30-day refund</p>
     </div>
 
     <div class="mockup">
@@ -517,6 +576,31 @@ devkit register my-api \
         </tr>
       </tbody>
     </table>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- PRICING -->
+<section class="section" id="pricing">
+  <div class="section-tag">Pricing</div>
+  <h2>One price. No subscriptions.</h2>
+  <p class="section-sub">Pay once, use forever. Every future release included.</p>
+  <div class="pricing-wrap">
+    <div class="price-card">
+      <div class="price-badge">⚡ Early Access — Founder's Price</div>
+      <div class="price-amount"><sup>$</sup>29</div>
+      <p class="price-desc">One-time · Lifetime updates included</p>
+      <ul class="price-features">
+        <li><span class="price-check">✓</span> CLI + macOS menu bar app + full Mac window</li>
+        <li><span class="price-check">✓</span> Every future version, forever — no subscription</li>
+        <li><span class="price-check">✓</span> Works with Claude Code, Cursor, Codex, Copilot, Windsurf</li>
+        <li><span class="price-check">✓</span> Source on GitHub (MIT) — you keep it either way</li>
+      </ul>
+      <a href="#" class="btn-buy" id="buy-btn">Get Early Access — $29 →</a>
+      <p class="price-refund">30-day no-questions refund if it doesn't work for you.</p>
+      <p class="price-source">Prefer to build from source? <a href="https://github.com/djadmin/devkit">GitHub →</a></p>
+    </div>
   </div>
 </section>
 
