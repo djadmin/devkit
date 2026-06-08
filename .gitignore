@@ -12,8 +12,26 @@ logs/
 # macOS
 .DS_Store
 
-# internal planning — lives in devkit-internal repo
+# PAID Mac app source — lives in the private devkit-app repo, NEVER in this public repo.
+# Ignored so a stray `git add .` can't re-leak the paid product.
+# NOTE: MenuBarApp/docs/ is intentionally NOT ignored — it's the public landing page
+# served at djadmin.github.io/devkit via the Pages workflow. Keep it tracked.
+MenuBarApp/DevkitBar/
+MenuBarApp/DevkitBarTests/
+MenuBarApp/DevkitBar.xcodeproj/
+MenuBarApp/.github/
 MenuBarApp/devkit-internal/
+MenuBarApp/project.yml
+MenuBarApp/setup.sh
+MenuBarApp/CHANGELOG.md
+MenuBarApp/README.md
+MenuBarApp/.gitignore
+
+# local Claude settings (machine-specific paths, gh allow-rules)
+.claude/settings.local.json
+
+# internal planning — lives in devkit-internal repo
 LAUNCH.md
 RELEASE_PLAN.md
 IDEAS.md
+.claude/
