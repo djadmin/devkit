@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/djadmin/devkit/main/install.sh | ba
 
 No, if you used the installer script — it calls bootstrap for you.
 
-If you used `brew install`, run `devkit bootstrap` once after. It creates `~/devkit/apps.json`, generates the initial `Caddyfile`, and links the Caddy config.
+If you used `brew install`, run `devkit bootstrap` once after. It creates `~/.devkit/apps.json`, generates the initial `Caddyfile`, and links the Caddy config.
 
 ### Why does Caddy need to run on port 80?
 
@@ -75,7 +75,7 @@ No. If Caddy's admin API is responding (`curl http://localhost:2019/config/`), d
 
 ### The install finished but `devkit` is not found in my shell.
 
-The installer adds `~/devkit/bin` to your `PATH` in `~/.zshrc` and `~/.bash_profile`. Open a new terminal tab, or run `source ~/.zshrc`, then try again.
+The installer adds `~/.local/bin` to your `PATH` in `~/.zshrc` and `~/.bash_profile`. Open a new terminal tab, or run `source ~/.zshrc`, then try again. (Homebrew installs put the binary in `/opt/homebrew/bin`, which is already on your PATH.)
 
 ---
 
@@ -289,14 +289,14 @@ If it is already listed as started but not working, try `devkit reload` to push 
 
 ### `devkit` says "command not found" even in a new shell.
 
-Your `PATH` is not updated. Check that `~/devkit/bin` appears in your PATH:
+Your `PATH` is not updated. Check that the devkit binary's directory appears in your PATH:
 ```bash
-echo $PATH | tr ':' '\n' | grep devkit
+echo $PATH | tr ':' '\n' | grep -E '\.local/bin|homebrew/bin'
 ```
 
-If missing, add it manually:
+If missing, add it manually (use the directory `devkit paths` / your install reported):
 ```bash
-echo 'export PATH="$HOME/devkit/bin:$PATH"' >> ~/.zshrc
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
@@ -305,7 +305,7 @@ source ~/.zshrc
 The menu bar app looks for the devkit CLI. If it cannot find it, it stays in a loading state. Make sure:
 1. `devkit` is on your PATH in a normal terminal
 2. You ran `devkit bootstrap` at least once
-3. `~/devkit/apps.json` exists
+3. `~/.devkit/apps.json` exists
 
 If those are all true, quit and reopen the app.
 
@@ -368,13 +368,19 @@ The menu bar app is macOS-only. The CLI technically runs anywhere bash + Caddy +
 # Stop all managed apps
 devkit stop-all
 
-# Remove the devkit home directory (registry, binary, config)
-rm -rf ~/devkit
+# Remove the data directory (registry, generated config, logs, pids)
+rm -rf ~/.devkit
+
+# Remove the binary + source
+rm -f ~/.local/bin/devkit          # the symlink the install script created
+rm -rf ~/.local/share/devkit       # the source checkout
+# (If you installed via Homebrew instead: brew uninstall devkit)
+# (Upgraded from an old install? Also remove the legacy ~/devkit directory.)
 
 # Remove the PATH lines from your shell config
 # Remove these two lines from ~/.zshrc and ~/.bash_profile:
 #   # devkit
-#   export PATH="$HOME/devkit/bin:$PATH"
+#   export PATH="$HOME/.local/bin:$PATH"
 
 # Remove the Caddy symlink devkit created
 rm -f /opt/homebrew/etc/Caddyfile  # only if it was a devkit symlink

@@ -2,19 +2,32 @@
 # devkit — local app registry, hostname proxy, process manager, dashboard.
 # Source of truth: $DEVKIT_HOME/apps.json
 # Generates:       $DEVKIT_HOME/Caddyfile, $DEVKIT_HOME/dashboard.html
+#
+# Data lives in $DEVKIT_HOME (default: ~/.devkit — a dotfile dir like .ssh/.aws,
+# kept separate from wherever the binary is installed: Homebrew, ~/.local/bin, or a
+# source checkout). Override DEVKIT_HOME to use XDG or any custom path.
 
 set -euo pipefail
 
-DEVKIT_VERSION="0.2.0"
+DEVKIT_VERSION="0.3.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
-DEVKIT_HOME="${DEVKIT_HOME:-$REPO_HOME}"
+
+# Did the user pin DEVKIT_HOME themselves? If so we never auto-migrate or second-guess
+# it. Capture this BEFORE applying the default so the two cases stay distinguishable.
+if [[ -n "${DEVKIT_HOME:-}" ]]; then DEVKIT_HOME_EXPLICIT=1; else DEVKIT_HOME_EXPLICIT=0; fi
+DEVKIT_HOME="${DEVKIT_HOME:-$HOME/.devkit}"
+
 APPS_JSON="$DEVKIT_HOME/apps.json"
 CADDYFILE="$DEVKIT_HOME/Caddyfile"
 DASHBOARD="$DEVKIT_HOME/dashboard.html"
 PIDS_DIR="$DEVKIT_HOME/pids"
 LOGS_DIR="$DEVKIT_HOME/logs"
+LOCK_DIR="$DEVKIT_HOME/.registry.lock"
+# Stamp recording the registry fingerprint the generated config was last built from.
+# Lets every command cheaply detect an out-of-band apps.json edit and self-heal.
+STAMP_FILE="$DEVKIT_HOME/.caddy.fingerprint"
 BREW_CADDYFILE="${DEVKIT_BREW_CADDYFILE:-/opt/homebrew/etc/Caddyfile}"
 
 die() { echo "devkit: $*" >&2; exit 1; }
@@ -24,21 +37,118 @@ need jq
 need lsof
 need pgrep
 
+# Pick a content hasher once. shasum ships with macOS; the others are fallbacks so
+# the staleness check still works on minimal/Linux environments and in CI.
+if command -v shasum >/dev/null 2>&1; then
+  _hash() { shasum | awk '{print $1}'; }
+elif command -v sha1sum >/dev/null 2>&1; then
+  _hash() { sha1sum | awk '{print $1}'; }
+else
+  _hash() { cksum | awk '{print $1"-"$2}'; }
+fi
+
 ensure_registry_dir() {
-  mkdir -p "$DEVKIT_HOME" "$PIDS_DIR" "$LOGS_DIR"
+  mkdir -p "$DEVKIT_HOME" "$PIDS_DIR" "$LOGS_DIR" 2>/dev/null || true
+}
+
+# One-time move of an old-style registry into the new default location (~/.devkit).
+#
+# Earlier versions defaulted DEVKIT_HOME to the install/checkout directory, so data
+# landed in ~/devkit (or wherever the repo was cloned). That pollutes $HOME with a
+# visible folder and breaks the moment the binary moves (Homebrew, ~/.local/bin). We
+# now keep data in ~/.devkit and migrate the old registry across the first time we run.
+#
+# Self-guarding and idempotent: returns immediately once ~/.devkit/apps.json exists, or
+# if the user pinned DEVKIT_HOME themselves. Caddyfile/dashboard are regenerated rather
+# than moved, so we only relocate the source of truth plus live runtime state.
+migrate_home_location() {
+  [[ "$DEVKIT_HOME_EXPLICIT" == "0" ]] || return 0
+  [[ -f "$APPS_JSON" ]] && return 0
+
+  local legacy="" cand
+  for cand in "$HOME/devkit" "$REPO_HOME"; do
+    [[ "$cand" == "$DEVKIT_HOME" ]] && continue
+    if [[ -f "$cand/apps.json" ]]; then legacy="$cand"; break; fi
+  done
+  [[ -n "$legacy" ]] || return 0
+
+  mkdir -p "$DEVKIT_HOME" "$PIDS_DIR" "$LOGS_DIR" 2>/dev/null || return 0
+  echo "devkit: migrating registry from $legacy → $DEVKIT_HOME (one-time)" >&2
+
+  mv "$legacy/apps.json" "$APPS_JSON" 2>/dev/null || cp "$legacy/apps.json" "$APPS_JSON" 2>/dev/null || return 0
+  if [[ -d "$legacy/pids" ]]; then mv "$legacy/pids/"*.pid "$PIDS_DIR/" 2>/dev/null || true; fi
+  if [[ -d "$legacy/logs" ]]; then mv "$legacy/logs/"*.log "$LOGS_DIR/" 2>/dev/null || true; fi
+
+  # If Caddy was pointed at the old generated config via the brew symlink, repoint it
+  # so reloads keep working. The new Caddyfile is regenerated on the next render.
+  local linked; linked=$(readlink "$BREW_CADDYFILE" 2>/dev/null || true)
+  if [[ "$linked" == "$legacy/Caddyfile" ]]; then
+    ln -sfn "$CADDYFILE" "$BREW_CADDYFILE" 2>/dev/null || true
+  fi
+  # Drop now-stale generated artifacts at the old location (registry already moved).
+  rm -f "$legacy/Caddyfile" "$legacy/dashboard.html" "$legacy/.caddy.fingerprint" 2>/dev/null || true
+
+  echo "devkit: migration complete — the binary/checkout at $legacy is left untouched." >&2
 }
 
 ensure_registry() {
   ensure_registry_dir
+  migrate_home_location
   if [[ ! -f "$APPS_JSON" ]]; then
-    echo '{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[]}' > "$APPS_JSON"
+    echo '{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[]}' > "$APPS_JSON" 2>/dev/null || true
   fi
+  # Catch a broken hand-edit / partial sync up front with a clear message, instead of
+  # letting every downstream `jq` spew cryptic parse errors (or worse, render an empty
+  # Caddyfile that silently drops every route).
+  if [[ -s "$APPS_JSON" ]] && ! jq empty "$APPS_JSON" >/dev/null 2>&1; then
+    die "registry is not valid JSON: $APPS_JSON
+  Fix the file or restore a backup. devkit won't touch routing until it parses."
+  fi
+}
+
+# Portable advisory lock around registry read-modify-write. macOS has no flock(1), so
+# we use mkdir (atomic) as the lock primitive, with stale-lock reclaim if the holder
+# process is dead. Without this, the menu bar app's polling plus a concurrent CLI write
+# can interleave two read-modify-write cycles and silently drop an app from apps.json.
+acquire_lock() {
+  # Reentrant within a single process: once held, nested callers (e.g. the legacy
+  # migration invoked from inside a register) are no-ops. The lock is process-scoped
+  # and released by the EXIT trap, which is exactly the lifetime of one CLI invocation.
+  [[ "${LOCK_HELD:-0}" == "1" ]] && return 0
+  ensure_registry_dir
+  local timeout="${1:-100}" i=0
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [[ -f "$LOCK_DIR/pid" ]]; then
+      local lpid; lpid=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
+      if [[ -n "$lpid" ]] && ! kill -0 "$lpid" 2>/dev/null; then
+        rm -rf "$LOCK_DIR" 2>/dev/null || true
+        continue
+      fi
+    fi
+    if (( i++ >= timeout )); then
+      die "could not acquire registry lock (held by pid $(cat "$LOCK_DIR/pid" 2>/dev/null || echo '?')) — try again in a moment"
+    fi
+    sleep 0.1
+  done
+  echo "$$" > "$LOCK_DIR/pid" 2>/dev/null || true
+  LOCK_HELD=1
+  # Release on any exit so a crash/die never leaves a stuck lock for this process.
+  trap 'release_lock' EXIT INT TERM
+}
+
+release_lock() {
+  rm -rf "$LOCK_DIR" 2>/dev/null || true
+  LOCK_HELD=0
 }
 
 migrate_legacy_registry() {
   ensure_registry
   jq -e '.apps[]? | select(.managedBy == "pm2")' "$APPS_JSON" >/dev/null 2>&1 || return 0
 
+  # This is a read-modify-write of apps.json. Take the lock so a concurrent writer
+  # (another CLI run, or the menu bar app) can't lose an update. acquire_lock is
+  # reentrant, so this is a no-op when a mutating command already holds it.
+  acquire_lock
   local tmp; tmp=$(mktemp)
   jq '.apps |= map(if .managedBy == "pm2" then .managedBy = "devkit" else . end)' "$APPS_JSON" > "$tmp"
   mv "$tmp" "$APPS_JSON"
@@ -66,16 +176,33 @@ detect_claude_md() {
   [[ -f "$path/CLAUDE.md" ]] && echo "$path/CLAUDE.md"
 }
 
+# A name becomes a Caddy site address (http://<name>.<tld>) and pid/log filenames.
+# Anything outside a DNS label — spaces, slashes, uppercase, dots — produces an invalid
+# Caddyfile that fails to load, which would take down routing for EVERY app on the next
+# reload. Reject it up front so one bad register can't break the whole proxy.
+valid_name() { [[ "$1" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; }
+assert_valid_name() {
+  valid_name "$1" || die "invalid app name '$1' — use lowercase letters, digits and hyphens, e.g. my-api"
+}
+
+# Ports must be real TCP ports. 0 is the sentinel for external apps registered without one.
+assert_valid_port() {
+  local p="$1"
+  [[ -z "$p" || "$p" == "0" ]] && return 0
+  [[ "$p" =~ ^[0-9]+$ ]] && (( p >= 1 && p <= 65535 )) || die "--port must be between 1 and 65535, got: $p"
+}
+
 assert_unique() {
   local name="$1" port="$2" hostname="$3"
   ensure_registry
-  if jq -e --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null; then
-    return 0
-  fi
-  if jq -e --argjson p "$port" '.apps[] | select(.port==$p)' "$APPS_JSON" >/dev/null; then
+  # Re-registering the SAME name is an allowed upsert, but the port/hostname must never
+  # collide with a DIFFERENT app (which would create two Caddy routes for one port).
+  # Skip the port check for the 0/empty sentinel (external apps registered without one).
+  if [[ -n "$port" && "$port" != "0" ]] && \
+     jq -e --arg n "$name" --argjson p "$port" '.apps[] | select(.name != $n and .port==$p)' "$APPS_JSON" >/dev/null; then
     die "port $port already taken by another app"
   fi
-  if jq -e --arg h "$hostname" '.apps[] | select(.hostname==$h)' "$APPS_JSON" >/dev/null; then
+  if jq -e --arg n "$name" --arg h "$hostname" '.apps[] | select(.name != $n and .hostname==$h)' "$APPS_JSON" >/dev/null; then
     die "hostname $hostname already taken"
   fi
 }
@@ -265,7 +392,10 @@ cmd_register() {
   done
 
   [[ -n "$name" ]] || die "usage: devkit register <name> --port N --cmd \"CMD\" [--path P]"
+  assert_valid_name "$name"
+  assert_valid_port "$port"
 
+  acquire_lock
   migrate_legacy_registry
 
   if [[ "$managed" == "devkit" ]]; then
@@ -307,8 +437,10 @@ cmd_register() {
 cmd_rename() {
   local old="${1:-}" new="${2:-}"
   [[ -n "$old" && -n "$new" ]] || die "usage: devkit rename <old> <new>"
+  acquire_lock
   migrate_legacy_registry
 
+  assert_valid_name "$new"
   jq -e --arg n "$old" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null || die "unknown app: $old"
   if jq -e --arg n "$new" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null; then
     die "name already taken: $new"
@@ -346,6 +478,7 @@ cmd_update() {
   [[ -n "$name" ]] || die "usage: devkit update <name> [--port N] [--cmd C] [--path P] [--desc D] [--managed-by M]"
   shift
 
+  acquire_lock
   migrate_legacy_registry
   jq -e --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null 2>&1 || die "unknown app: $name"
 
@@ -362,6 +495,7 @@ cmd_update() {
   done
 
   [[ -n "$port$cmd$path$desc$managed" ]] || die "nothing to update — specify at least one flag"
+  assert_valid_port "$port"
 
   if [[ -n "$path" ]]; then
     path="$(cd "$path" 2>/dev/null && pwd -P)" || die "path does not exist: $path"
@@ -405,6 +539,7 @@ cmd_update() {
 cmd_remove() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit remove <name>"
+  acquire_lock
   migrate_legacy_registry
   if is_running "$name"; then
     local port path
@@ -553,6 +688,11 @@ cmd_start() {
   # This prevents the parent shell from printing "Terminated" when we kill the process.
   # The wrapper bash writes its PID first; once the app binds its port we reconcile
   # the pidfile to the real listener PID so later status/stop calls target the server.
+  #
+  # The start command is run via a single `bash -c "$DEVKIT_CMD"` — exactly one shell
+  # interpretation, the same as typing it in a terminal. We deliberately do NOT `eval`
+  # it: a second round of expansion was a footgun with no benefit (and surprising when
+  # the command contains quotes/$ values).
   ( cd "$path" && DEVKIT_CMD="$cmd" DEVKIT_PF="$pf" DEVKIT_LOG="$lf" \
     perl -e '
       use POSIX qw(setsid);
@@ -562,7 +702,7 @@ cmd_start() {
       open STDIN,  "<",  "/dev/null";
       open STDOUT, ">>", $ENV{DEVKIT_LOG} or die;
       open STDERR, ">&STDOUT";
-      exec "/bin/bash", "-c", q(echo $$ > "$DEVKIT_PF"; eval "$DEVKIT_CMD");
+      exec "/bin/bash", "-c", q(echo $$ > "$DEVKIT_PF"; exec /bin/bash -c "$DEVKIT_CMD");
     ' )
 
   local pid="" i=0
@@ -672,6 +812,10 @@ render_caddyfile() {
   local listen=""
   [[ "$pp" != "80" ]] && listen=":$pp"
 
+  # Render to a temp file in the same directory, then rename into place. Rename is
+  # atomic on the same filesystem, so a concurrent `caddy reload` (or the menu bar app)
+  # can never read a half-written Caddyfile — it sees either the old file or the new one.
+  local tmp; tmp=$(mktemp "$CADDYFILE.XXXXXX" 2>/dev/null) || return 1
   {
     echo "# generated by devkit — edit apps.json instead"
     echo "{"
@@ -679,18 +823,27 @@ render_caddyfile() {
     echo "  admin localhost:2019"
     echo "}"
     echo
-    echo "# dashboard"
+    echo "# dashboard — only dashboard.html is served; apps.json, logs and pids stay private"
     echo "http://$(dash_host).$(tld)$listen {"
     echo "  root * $DEVKIT_HOME"
-    echo "  rewrite / /dashboard.html"
-    echo "  file_server"
+    echo "  handle / {"
+    echo "    rewrite * /dashboard.html"
+    echo "    file_server"
+    echo "  }"
+    echo "  handle /dashboard.html {"
+    echo "    file_server"
+    echo "  }"
+    echo "  handle {"
+    echo "    respond \"not found\" 404"
+    echo "  }"
     echo "}"
     echo
     jq -r --arg listen "$listen" '
       .apps[]
       | "http://\(.hostname)\($listen) {\n  reverse_proxy localhost:\(.port)\n}\n"
     ' "$APPS_JSON"
-  } > "$CADDYFILE"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$CADDYFILE"
 }
 
 render_dashboard() {
@@ -720,7 +873,9 @@ render_dashboard() {
 "
   done < <(jq -r '.apps[] | [.name, .hostname, (.port|tostring), .managedBy, (.path // ""), (.repo // ""), (.claudeMd // "")] | @tsv' "$APPS_JSON")
 
-  cat > "$DASHBOARD" <<HTML
+  # Atomic write (temp-in-dir + rename), same rationale as render_caddyfile.
+  local tmp; tmp=$(mktemp "$DASHBOARD.XXXXXX" 2>/dev/null) || return 1
+  cat > "$tmp" <<HTML
 <!doctype html>
 <html lang="en">
 <head>
@@ -805,31 +960,91 @@ setInterval(checkStatus, 15000);
 </body>
 </html>
 HTML
+  mv "$tmp" "$DASHBOARD"
 }
 
 # ---------- proxy lifecycle ----------
 
+# Fingerprint of the registry's *normalized* content. Using the content (not the file
+# mtime) is what makes staleness detection robust: restoring from a backup, syncing
+# from another machine, or `git checkout` can all leave apps.json with an OLDER
+# timestamp than the Caddyfile, so an mtime comparison would wrongly conclude "fresh"
+# and the .localhost hosts would silently stop resolving. A content hash can't be
+# fooled that way, and `jq -S -c` normalizes formatting so cosmetic re-saves don't churn.
+registry_fingerprint() {
+  jq -S -c . "$APPS_JSON" 2>/dev/null | _hash
+}
+
+stamp_fingerprint() {
+  printf '%s\n' "$(registry_fingerprint)" > "$STAMP_FILE" 2>/dev/null || true
+}
+
+# True when the generated config no longer matches apps.json — either a generated file
+# is missing, or the registry changed since we last rendered (including out-of-band edits).
+registry_is_stale() {
+  [[ -f "$CADDYFILE" && -f "$DASHBOARD" && -f "$STAMP_FILE" ]] || return 0
+  local cur stored
+  cur=$(registry_fingerprint)
+  [[ -n "$cur" ]] || return 1            # unreadable/invalid registry → don't churn
+  stored=$(cat "$STAMP_FILE" 2>/dev/null || echo "")
+  [[ "$cur" != "$stored" ]]
+}
+
+# Self-healing reconcile, run at the top of every routing-dependent command. If
+# apps.json was changed outside devkit, regenerate the Caddyfile + dashboard and reload
+# Caddy so hostnames resolve again — no matter which command the user happened to run.
+# Strictly best-effort: it must never fail a read-only command (e.g. `list` on a
+# read-only registry dir), so every step is guarded.
+ensure_fresh() {
+  ensure_registry
+  registry_is_stale || return 0
+  render_caddyfile 2>/dev/null || return 0
+  render_dashboard 2>/dev/null || return 0
+  stamp_fingerprint
+  caddy_admin_reload >/dev/null 2>&1 || true
+  return 0
+}
+
+# Returns: 0 = actually reloaded, 1 = caddy not installed,
+#          2 = caddy installed but not managing devkit's Caddyfile (not symlinked).
 caddy_admin_reload() {
   command -v caddy >/dev/null 2>&1 || return 1
-  local linked; linked=$(readlink "$BREW_CADDYFILE" 2>/dev/null || true)
-  [[ "$linked" == "$CADDYFILE" ]] || return 0
-  caddy reload --config "$CADDYFILE" --address localhost:2019
+  # Ownership check: only push config to Caddy if it's actually serving devkit's file,
+  # so we never clobber a Caddy the user runs for something else. The Homebrew symlink is
+  # the normal signal; DEVKIT_CADDY_MANAGED=1 is the escape hatch for source/manual setups
+  # that run `caddy run --config ~/.devkit/Caddyfile` directly (no brew symlink).
+  if [[ "${DEVKIT_CADDY_MANAGED:-0}" != "1" ]]; then
+    local linked; linked=$(readlink "$BREW_CADDYFILE" 2>/dev/null || true)
+    [[ "$linked" == "$CADDYFILE" ]] || return 2
+  fi
+  caddy reload --config "$CADDYFILE" --address "${DEVKIT_CADDY_ADMIN:-localhost:2019}"
 }
 
 cmd_reload() {
   render_caddyfile
   render_dashboard
-  local out; out=$(caddy_admin_reload 2>&1)
-  local code=$?
-  if [[ $code -eq 0 ]]; then
-    echo "reloaded Caddy"
-  else
-    # Warn but do NOT fail — registry + Caddyfile are already written correctly.
-    # Caddy may not be running yet (first-time setup), or the user manages it separately.
-    echo "devkit: warning — Caddy not reloaded (is it running?)" >&2
-    echo "  Run: sudo brew services start caddy" >&2
-    [[ -n "$out" ]] && echo "  $out" >&2
-  fi
+  stamp_fingerprint
+  # Capture exit code without tripping `set -e` on a non-zero reload.
+  local out code
+  if out=$(caddy_admin_reload 2>&1); then code=0; else code=$?; fi
+  case "$code" in
+    0)
+      echo "reloaded Caddy"
+      ;;
+    2)
+      # Be honest: the route was written but Caddy is NOT serving it yet, so the new
+      # app's URL would 404. Don't claim success.
+      echo "devkit: registry updated, but Caddy isn't using devkit's config yet — your" >&2
+      echo "  new URL won't resolve until you link it. Run: devkit bootstrap" >&2
+      echo "  then: sudo brew services start caddy" >&2
+      ;;
+    *)
+      # Registry + Caddyfile are written correctly; Caddy just isn't running/installed.
+      echo "devkit: warning — Caddy not reloaded (is it installed and running?)" >&2
+      echo "  Run: sudo brew services start caddy" >&2
+      [[ -n "$out" ]] && echo "  $out" >&2
+      ;;
+  esac
   return 0
 }
 
@@ -843,6 +1058,7 @@ cmd_bootstrap() {
 
   render_caddyfile
   render_dashboard
+  stamp_fingerprint
 
   if [[ -e "$BREW_CADDYFILE" && ! -L "$BREW_CADDYFILE" ]]; then
     echo "$BREW_CADDYFILE exists and is not a symlink — leaving it alone"
@@ -912,6 +1128,7 @@ cmd_clone_all() {
 }
 
 cmd_paths() {
+  ensure_registry   # run any pending one-time migration so the paths reflect reality
   cat <<OUT
 REPO_HOME=$REPO_HOME
 DEVKIT_HOME=$DEVKIT_HOME
@@ -920,7 +1137,57 @@ CADDYFILE=$CADDYFILE
 DASHBOARD=$DASHBOARD
 PIDS_DIR=$PIDS_DIR
 LOGS_DIR=$LOGS_DIR
+STAMP_FILE=$STAMP_FILE
 OUT
+}
+
+# ---------- MCP integration ----------
+
+# Wire the devkit MCP server into an AI agent so it can register/manage apps as
+# structured tool calls (instead of relying on a CLAUDE.md text instruction).
+cmd_setup_mcp() {
+  local candidates=(
+    "$REPO_HOME/../devkit-mcp/index.js"
+    "$REPO_HOME/devkit-mcp/index.js"
+    "$REPO_HOME/mcp-server/index.js"
+    "$DEVKIT_HOME/devkit-mcp/index.js"
+    "$DEVKIT_HOME/mcp-server/index.js"
+    "$HOME/devkit/mcp-server/index.js"
+  )
+  local server="" c
+  for c in "${candidates[@]}"; do
+    if [[ -f "$c" ]]; then
+      server="$(cd "$(dirname "$c")" && pwd)/index.js"
+      break
+    fi
+  done
+  [[ -n "$server" ]] || die "could not find the devkit MCP server (index.js) — expected near $REPO_HOME/../devkit-mcp/"
+
+  need node
+
+  # Install the MCP's dependencies if missing, otherwise the server crashes on first
+  # call with "Cannot find module @modelcontextprotocol/sdk".
+  local server_dir; server_dir=$(dirname "$server")
+  if [[ ! -d "$server_dir/node_modules/@modelcontextprotocol" ]]; then
+    need npm
+    echo "installing devkit MCP dependencies..."
+    (cd "$server_dir" && npm install --silent) || die "npm install failed in $server_dir"
+  fi
+
+  if command -v claude >/dev/null 2>&1; then
+    if claude mcp add devkit -- node "$server"; then
+      echo "devkit MCP registered with Claude Code. Restart Claude Code to load it."
+    else
+      die "failed to register the MCP with Claude Code (try: claude mcp add devkit -- node \"$server\")"
+    fi
+  else
+    echo "Claude Code CLI not found. Add the devkit MCP to your agent manually:"
+    echo "  command: node"
+    echo "  args:    $server"
+    echo
+    echo "  Claude Code:  claude mcp add devkit -- node \"$server\""
+    echo "  Cursor/Codex: add the same command+args to the editor's MCP config."
+  fi
 }
 
 # ---------- help ----------
@@ -955,6 +1222,9 @@ Sync / portability:
   devkit bootstrap
   devkit paths
 
+AI agent integration:
+  devkit setup-mcp          # register the devkit MCP server with Claude Code / your agent
+
 Internals:
   devkit reload
   devkit version
@@ -962,6 +1232,16 @@ OUT
 }
 
 cmd_version() { echo "devkit $DEVKIT_VERSION"; }
+
+# Self-heal stale routing before any command that depends on the proxy being correct.
+# Mutating commands (register/rename/update/remove) re-render at the end via cmd_reload,
+# so they don't need this — but every read/lifecycle path does, which is what closes the
+# "apps.json edited outside devkit" gap regardless of which command the user runs.
+case "${1:-help}" in
+  start|stop|restart|start-all|stop-all|restart-all|list|show|open|logs|clone|clone-all|edit)
+    ensure_fresh
+    ;;
+esac
 
 case "${1:-help}" in
   register)    shift; cmd_register "$@" ;;
@@ -984,6 +1264,7 @@ case "${1:-help}" in
   clone)       shift; cmd_clone "$@" ;;
   clone-all)   cmd_clone_all ;;
   paths)       cmd_paths ;;
+  setup-mcp)   cmd_setup_mcp ;;
   version|--version|-v) cmd_version ;;
   help|--help|-h) cmd_help ;;
   *) echo "devkit: unknown command: $1" >&2; cmd_help; exit 2 ;;

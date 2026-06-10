@@ -8,14 +8,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"
 HOME_DIR="$TMP_ROOT/home"
 BREW_CADDYFILE="$TMP_ROOT/homebrew/etc/Caddyfile"
-DEVKIT_BIN="$HOME_DIR/devkit/bin/devkit"
+# New layout: binary lives on PATH (~/.local/bin), data lives in ~/.devkit — separate.
+DEVKIT_BIN="$HOME_DIR/.local/bin/devkit"
+DATA_DIR="$HOME_DIR/.devkit"
 
 PASS=0
 FAIL=0
 
 cleanup() {
   if [[ -x "$DEVKIT_BIN" ]]; then
-    DEVKIT_HOME="$HOME_DIR/devkit" "$DEVKIT_BIN" stop-all >/dev/null 2>&1 || true
+    DEVKIT_HOME="$DATA_DIR" "$DEVKIT_BIN" stop-all >/dev/null 2>&1 || true
   fi
   rm -rf "$TMP_ROOT"
 }
@@ -99,6 +101,7 @@ echo
 echo "--- install ---"
 install_out=$(
   HOME="$HOME_DIR" \
+  DEVKIT_HOME="$DATA_DIR" \
   DEVKIT_REPO="$REPO_ROOT" \
   DEVKIT_LOCAL_WORKTREE=1 \
   DEVKIT_NONINTERACTIVE=1 \
@@ -107,14 +110,16 @@ install_out=$(
   bash "$REPO_ROOT/install.sh" 2>&1
 )
 assert_contains "installer reports ready" "devkit is ready" "$install_out"
-assert_file "installed binary exists" "$DEVKIT_BIN"
-assert_file "apps.json created" "$HOME_DIR/devkit/apps.json"
-assert_file "Caddyfile created" "$HOME_DIR/devkit/Caddyfile"
-assert_file "dashboard created" "$HOME_DIR/devkit/dashboard.html"
+assert_file "binary linked onto PATH" "$DEVKIT_BIN"
+assert_eq "binary is a symlink into the source dir" "$HOME_DIR/.local/share/devkit/bin/devkit" "$(readlink "$DEVKIT_BIN")"
+assert_file "apps.json created in ~/.devkit" "$DATA_DIR/apps.json"
+assert_file "Caddyfile created in ~/.devkit" "$DATA_DIR/Caddyfile"
+assert_file "dashboard created in ~/.devkit" "$DATA_DIR/dashboard.html"
+assert_no_file "no bare ~/devkit data dir polluting home" "$HOME_DIR/devkit"
 assert_file "zshrc created" "$HOME_DIR/.zshrc"
-assert_contains "zshrc updated with devkit path" "$HOME_DIR/devkit/bin" "$(cat "$HOME_DIR/.zshrc")"
+assert_contains "zshrc updated with bin path" "$HOME_DIR/.local/bin" "$(cat "$HOME_DIR/.zshrc")"
 assert_eq "brew caddyfile is symlink" "true" "$( [[ -L "$BREW_CADDYFILE" ]] && echo true || echo false )"
-assert_eq "brew caddyfile points at devkit caddyfile" "$HOME_DIR/devkit/Caddyfile" "$(readlink "$BREW_CADDYFILE")"
+assert_eq "brew caddyfile points at devkit caddyfile" "$DATA_DIR/Caddyfile" "$(readlink "$BREW_CADDYFILE")"
 assert_no_file "claude config untouched in non-interactive mode" "$HOME_DIR/.claude/CLAUDE.md"
 
 echo "--- installed CLI smoke ---"
@@ -125,22 +130,22 @@ exec python3 -m http.server 5093 --bind 127.0.0.1
 SH
 chmod +x "$TMP_ROOT/app/serve.sh"
 
-out=$(HOME="$HOME_DIR" DEVKIT_HOME="$HOME_DIR/devkit" "$DEVKIT_BIN" register smoke --path "$TMP_ROOT/app" --port 5093 --cmd "./serve.sh" 2>&1 || true)
+out=$(HOME="$HOME_DIR" DEVKIT_HOME="$DATA_DIR" "$DEVKIT_BIN" register smoke --path "$TMP_ROOT/app" --port 5093 --cmd "./serve.sh" 2>&1 || true)
 assert_contains "register works after install" "smoke.localhost" "$out"
 
-out=$(HOME="$HOME_DIR" DEVKIT_HOME="$HOME_DIR/devkit" "$DEVKIT_BIN" start smoke 2>&1 || true)
+out=$(HOME="$HOME_DIR" DEVKIT_HOME="$DATA_DIR" "$DEVKIT_BIN" start smoke 2>&1 || true)
 assert_contains "start works after install" "started smoke" "$out"
 listener_pid=$(wait_for_port_state 5093 listening 60 || true)
-assert_eq "pid file matches listener after install" "$listener_pid" "$(cat "$HOME_DIR/devkit/pids/smoke.pid")"
+assert_eq "pid file matches listener after install" "$listener_pid" "$(cat "$DATA_DIR/pids/smoke.pid")"
 
-out=$(HOME="$HOME_DIR" DEVKIT_HOME="$HOME_DIR/devkit" "$DEVKIT_BIN" list 2>&1 || true)
+out=$(HOME="$HOME_DIR" DEVKIT_HOME="$DATA_DIR" "$DEVKIT_BIN" list 2>&1 || true)
 line=$(printf '%s\n' "$out" | grep -E '^smoke[[:space:]]+5093[[:space:]]+' || true)
 assert_contains "list shows smoke running after install" "running" "$line"
 
-out=$(HOME="$HOME_DIR" DEVKIT_HOME="$HOME_DIR/devkit" "$DEVKIT_BIN" stop smoke 2>&1 || true)
+out=$(HOME="$HOME_DIR" DEVKIT_HOME="$DATA_DIR" "$DEVKIT_BIN" stop smoke 2>&1 || true)
 assert_contains "stop works after install" "stopped smoke" "$out"
 wait_for_port_state 5093 free 60
-assert_eq "pid file removed after installed stop" "false" "$( [[ -f "$HOME_DIR/devkit/pids/smoke.pid" ]] && echo true || echo false )"
+assert_eq "pid file removed after installed stop" "false" "$( [[ -f "$DATA_DIR/pids/smoke.pid" ]] && echo true || echo false )"
 
 echo
 echo "=== results: $PASS passed, $FAIL failed ==="

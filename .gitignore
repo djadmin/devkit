@@ -13,19 +13,11 @@ logs/
 .DS_Store
 
 # PAID Mac app source — lives in the private devkit-app repo, NEVER in this public repo.
-# Ignored so a stray `git add .` can't re-leak the paid product.
-# NOTE: MenuBarApp/docs/ is intentionally NOT ignored — it's the public landing page
-# served at djadmin.github.io/devkit via the Pages workflow. Keep it tracked.
-MenuBarApp/DevkitBar/
-MenuBarApp/DevkitBarTests/
-MenuBarApp/DevkitBar.xcodeproj/
-MenuBarApp/.github/
-MenuBarApp/devkit-internal/
-MenuBarApp/project.yml
-MenuBarApp/setup.sh
-MenuBarApp/CHANGELOG.md
-MenuBarApp/README.md
-MenuBarApp/.gitignore
+# Blanket-ignore everything under MenuBarApp so a stray `git add .` (or a newly named
+# source file/dir) can't re-leak the paid product. The ONLY exception is docs/, the
+# public landing page served at djadmin.github.io/devkit via the Pages workflow.
+MenuBarApp/*
+!MenuBarApp/docs/
 
 # local Claude settings (machine-specific paths, gh allow-rules)
 .claude/settings.local.json

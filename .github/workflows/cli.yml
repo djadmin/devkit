@@ -17,11 +17,19 @@ jobs:
         run: |
           command -v jq >/dev/null 2>&1 || brew install jq
 
+      - name: Ensure caddy is installed
+        run: |
+          command -v caddy >/dev/null 2>&1 || brew install caddy
+
       - name: Syntax check CLI and tests
         run: |
           bash -n bin/devkit
+          bash -n install.sh
           bash -n test/test_registry.sh
-          bash -n devkit_test/test_registry.sh
+          bash -n test/test_install.sh
 
       - name: Run CLI integration suite
         run: bash test/test_registry.sh
+
+      - name: Run installer smoke test
+        run: bash test/test_install.sh

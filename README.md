@@ -103,8 +103,8 @@ Browse everything at `http://dash.localhost`.
 
 ## Reliability
 
-- 67 CLI lifecycle tests
-- 16 installer smoke tests
+- 89 CLI lifecycle tests
+- 18 installer smoke tests
 - GitHub Actions on fresh macOS runners
 
 Explicitly covers stale pid files, orphan recovery, restart pressure, port conflicts, and failed starts.
@@ -129,15 +129,28 @@ bash test/test_install.sh
 
 ## State Files
 
+devkit keeps its data in `~/.devkit` — a hidden dotfile directory, like `~/.ssh`,
+`~/.aws`, or `~/.kube`. This is separate from where the binary is installed, so the
+registry survives reinstalls and Homebrew upgrades and never clutters your home folder.
+
 ```text
-~/devkit/apps.json        ← registry
-~/devkit/Caddyfile        ← generated proxy config
-~/devkit/dashboard.html   ← generated dashboard
-~/devkit/logs/<name>.log  ← app logs
-~/devkit/pids/<name>.pid  ← PID files
+~/.devkit/apps.json        ← registry (source of truth)
+~/.devkit/Caddyfile        ← generated proxy config
+~/.devkit/dashboard.html   ← generated dashboard
+~/.devkit/logs/<name>.log  ← app logs
+~/.devkit/pids/<name>.pid  ← PID files
 ```
 
-Override location with `DEVKIT_HOME`.
+Override the location with `DEVKIT_HOME` (e.g. `export DEVKIT_HOME="$XDG_DATA_HOME/devkit"`).
+
+The binary itself lives wherever your install method puts it — `/opt/homebrew/bin/devkit`
+(Homebrew), `~/.local/bin/devkit` (install script), or `bin/devkit` in a source checkout.
+`devkit paths` prints exactly where everything is.
+
+> **Upgrading from an older devkit?** Earlier versions stored data in `~/devkit`. The
+> first time you run any command, devkit moves your registry to `~/.devkit` automatically
+> and leaves the old binary/checkout untouched. You can then remove the stale
+> `export PATH=".../devkit/bin:$PATH"` line from your shell rc if the installer added one.
 
 ---
 

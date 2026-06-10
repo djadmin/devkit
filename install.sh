@@ -4,7 +4,13 @@
 
 set -euo pipefail
 
-DEVKIT_DIR="${DEVKIT_DIR:-$HOME/devkit}"
+# Where the devkit *source* (the binary + its repo) is installed. This is code, not
+# data — kept out of $HOME's top level. Data lives separately in ~/.devkit (see the
+# CLI's DEVKIT_HOME default), so the registry survives reinstalls and Homebrew upgrades.
+DEVKIT_DIR="${DEVKIT_DIR:-$HOME/.local/share/devkit}"
+# A directory already on most users' PATH; we drop a `devkit` symlink here so the
+# binary's location is independent of where the data lives.
+DEVKIT_BIN_DIR="${DEVKIT_BIN_DIR:-$HOME/.local/bin}"
 DEVKIT_REPO="${DEVKIT_REPO:-https://github.com/djadmin/devkit.git}"
 DEVKIT_NONINTERACTIVE="${DEVKIT_NONINTERACTIVE:-0}"
 DEVKIT_SKIP_BREW_SERVICES="${DEVKIT_SKIP_BREW_SERVICES:-0}"
@@ -53,20 +59,30 @@ elif [[ -d "$DEVKIT_DIR/.git" ]]; then
   git -C "$DEVKIT_DIR" pull --quiet
   ok "devkit updated at $DEVKIT_DIR"
 else
+  mkdir -p "$(dirname "$DEVKIT_DIR")"
   git clone --quiet "$DEVKIT_REPO" "$DEVKIT_DIR"
   ok "devkit installed at $DEVKIT_DIR"
 fi
 
+# ── Binary on PATH ───────────────────────────────────────────────────────────
+# Symlink the binary into a PATH dir so its location is decoupled from both the data
+# dir (~/.devkit) and the source dir. This mirrors how a Homebrew formula would link
+# bin/devkit into /opt/homebrew/bin while keeping data in ~/.devkit.
+step "Linking the devkit binary..."
+mkdir -p "$DEVKIT_BIN_DIR"
+ln -sfn "$DEVKIT_DIR/bin/devkit" "$DEVKIT_BIN_DIR/devkit"
+ok "Linked $DEVKIT_BIN_DIR/devkit -> $DEVKIT_DIR/bin/devkit"
+
 # ── PATH ─────────────────────────────────────────────────────────────────────
 step "Setting up PATH..."
-EXPORT_LINE="export PATH=\"$DEVKIT_DIR/bin:\$PATH\""
+EXPORT_LINE="export PATH=\"$DEVKIT_BIN_DIR:\$PATH\""
 added=0
 rc_candidates=("$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc")
 has_existing_rc=0
 for rc in "${rc_candidates[@]}"; do
   [[ -f "$rc" ]] || continue
   has_existing_rc=1
-  if ! grep -q 'devkit/bin' "$rc" 2>/dev/null; then
+  if ! grep -qF "$DEVKIT_BIN_DIR" "$rc" 2>/dev/null; then
     echo "" >> "$rc"
     echo "# devkit" >> "$rc"
     echo "$EXPORT_LINE" >> "$rc"
@@ -82,7 +98,7 @@ if [[ $has_existing_rc -eq 0 ]]; then
   added=1
 fi
 [[ $added -eq 0 ]] && ok "PATH already configured"
-export PATH="$DEVKIT_DIR/bin:$PATH"
+export PATH="$DEVKIT_BIN_DIR:$PATH"
 
 # ── jq ───────────────────────────────────────────────────────────────────────
 step "Checking dependencies..."
@@ -103,8 +119,8 @@ fi
 
 # ── bootstrap ────────────────────────────────────────────────────────────────
 step "Bootstrapping devkit..."
-"$DEVKIT_DIR/bin/devkit" bootstrap
-ok "devkit bootstrapped"
+"$DEVKIT_BIN_DIR/devkit" bootstrap
+ok "devkit bootstrapped (data dir: ${DEVKIT_HOME:-$HOME/.devkit})"
 
 # ── Caddy service ────────────────────────────────────────────────────────────
 step "Starting Caddy..."

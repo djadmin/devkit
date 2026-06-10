@@ -234,6 +234,16 @@ echo "--- duplicate port ---"
 mkdir -p "$TMP_HOME/fake-app3"
 assert_exit "duplicate port rejected" 1 "$DEVKIT" register --name third --path "$TMP_HOME/fake-app3" --port 5000 --cmd "x --port 5000"
 
+# -- input validation (a bad name/port must never reach the Caddyfile) --
+echo "--- input validation ---"
+assert_exit "rejects name with a space"   1 "$DEVKIT" register "bad name" --port 5300 --cmd "x"
+assert_exit "rejects uppercase name"      1 "$DEVKIT" register BadName    --port 5301 --cmd "x"
+assert_exit "rejects name with a slash"   1 "$DEVKIT" register a/b        --port 5302 --cmd "x"
+assert_exit "rejects out-of-range port"   1 "$DEVKIT" register okname     --port 99999 --cmd "x"
+assert_exit "rejects non-numeric port"    1 "$DEVKIT" register okname     --port abc   --cmd "x"
+bad_count=$(jq '[.apps[] | select(.name=="bad name" or .name=="BadName" or .name=="a/b" or .name=="okname")] | length' "$TMP_HOME/apps.json")
+assert_eq "no invalid app slipped into the registry" "0" "$bad_count"
+
 # -- rename --
 echo "--- rename ---"
 out=$("$DEVKIT" rename testapp renamed-app 2>&1 || true)
@@ -291,6 +301,21 @@ caddy_content=$(cat "$TMP_HOME/Caddyfile")
 assert_contains "Caddyfile has renamed-app" "renamed-app.localhost" "$caddy_content"
 assert_contains "Caddyfile has reuse" "reuse.localhost" "$caddy_content"
 assert_contains "Caddyfile has http:// prefix" "http://" "$caddy_content"
+# Dashboard host must NOT expose the whole data dir (apps.json / logs) — only the page.
+assert_contains "dashboard route serves only dashboard.html" "handle /dashboard.html" "$caddy_content"
+assert_contains "dashboard route 404s everything else" 'respond "not found" 404' "$caddy_content"
+
+# If caddy is available, prove the generated config actually parses — this is the
+# regression guard that stops a bad name/port/template change from breaking routing.
+if command -v caddy >/dev/null 2>&1; then
+  set +e
+  caddy validate --adapter caddyfile --config "$TMP_HOME/Caddyfile" >/dev/null 2>&1
+  vcode=$?
+  set -e
+  assert_eq "generated Caddyfile passes 'caddy validate'" "0" "$vcode"
+else
+  echo "  SKIP  caddy validate (caddy not installed)"
+fi
 
 dash_content=$(cat "$TMP_HOME/dashboard.html")
 assert_contains "dashboard has renamed-app" "renamed-app" "$dash_content"
@@ -414,6 +439,68 @@ assert_contains "crash app shows stopped after failed start" "stopped" "$line"
 # -- unknown command --
 echo "--- error handling ---"
 assert_exit "unknown command exits 2" 2 "$DEVKIT" bogus
+
+# -- malformed registry is caught early with a clear message --
+echo "--- malformed registry guard ---"
+BAD_HOME=$(mktemp -d)
+printf '{ this is not valid json' > "$BAD_HOME/apps.json"
+set +e
+bad_out=$(DEVKIT_HOME="$BAD_HOME" "$DEVKIT" list 2>&1)
+bad_code=$?
+set -e
+assert_eq "malformed registry exits nonzero" "1" "$bad_code"
+assert_contains "malformed registry explains the problem" "not valid JSON" "$bad_out"
+rm -rf "$BAD_HOME"
+
+# -- staleness self-heal: apps.json edited outside devkit --
+echo "--- staleness self-heal ---"
+STALE_HOME=$(mktemp -d)
+mkdir -p "$STALE_HOME/app-a"
+DEVKIT_HOME="$STALE_HOME" "$DEVKIT" register stale-a --path "$STALE_HOME/app-a" --port 5310 --cmd "x --port 5310" >/dev/null 2>&1 || true
+assert_contains "caddyfile has registered app" "stale-a.localhost" "$(cat "$STALE_HOME/Caddyfile")"
+# Simulate an out-of-band edit (backup restore / sync / hand-edit): add an app straight
+# to apps.json with no devkit command, so the generated Caddyfile is now stale.
+edit_tmp=$(mktemp)
+jq '.apps += [{"name":"ghost","hostname":"ghost.localhost","port":5311,"path":null,"repo":null,"claudeMd":null,"startCmd":null,"description":"","managedBy":"external"}]' \
+  "$STALE_HOME/apps.json" > "$edit_tmp" && mv "$edit_tmp" "$STALE_HOME/apps.json"
+assert_not_contains "caddyfile stale before reconcile" "ghost.localhost" "$(cat "$STALE_HOME/Caddyfile")"
+# A read-only command (list) must self-heal the routing — this is the core fix.
+DEVKIT_HOME="$STALE_HOME" "$DEVKIT" list >/dev/null 2>&1 || true
+assert_contains "list regenerates stale caddyfile" "ghost.localhost" "$(cat "$STALE_HOME/Caddyfile")"
+# A second run with no further edits must NOT keep churning (fingerprint matches).
+cksum_before=$(cksum < "$STALE_HOME/Caddyfile")
+DEVKIT_HOME="$STALE_HOME" "$DEVKIT" list >/dev/null 2>&1 || true
+assert_eq "stable caddyfile when nothing changed" "$cksum_before" "$(cksum < "$STALE_HOME/Caddyfile")"
+rm -rf "$STALE_HOME"
+
+# -- default data dir is ~/.devkit (independent of where the binary lives) --
+echo "--- default DEVKIT_HOME ---"
+DEF_ROOT=$(mktemp -d)
+mkdir -p "$DEF_ROOT/bin"
+cp "$DEVKIT" "$DEF_ROOT/bin/devkit"   # copy so REPO_HOME points at the sandbox, not the real repo
+def_out=$(env -u DEVKIT_HOME HOME="$DEF_ROOT" "$DEF_ROOT/bin/devkit" paths 2>&1 || true)
+assert_contains "default data dir is ~/.devkit" "DEVKIT_HOME=$DEF_ROOT/.devkit" "$def_out"
+assert_contains "apps.json lives under ~/.devkit" "APPS_JSON=$DEF_ROOT/.devkit/apps.json" "$def_out"
+rm -rf "$DEF_ROOT"
+
+# -- one-time migration from a legacy ~/devkit location --
+echo "--- legacy home migration ---"
+MIG_ROOT=$(mktemp -d)
+mkdir -p "$MIG_ROOT/bin" "$MIG_ROOT/devkit/pids" "$MIG_ROOT/devkit/logs"
+cp "$DEVKIT" "$MIG_ROOT/bin/devkit"
+cat > "$MIG_ROOT/devkit/apps.json" <<'JSON'
+{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[{"name":"legacy-app","hostname":"legacy-app.localhost","port":5320,"path":null,"repo":null,"claudeMd":null,"startCmd":null,"description":"","managedBy":"external"}]}
+JSON
+echo "5320" > "$MIG_ROOT/devkit/pids/legacy-app.pid"
+mig_out=$(env -u DEVKIT_HOME HOME="$MIG_ROOT" "$MIG_ROOT/bin/devkit" list 2>&1 || true)
+assert_eq "registry migrated into ~/.devkit" "true" "$( [[ -f "$MIG_ROOT/.devkit/apps.json" ]] && echo true || echo false )"
+assert_eq "legacy apps.json moved out" "false" "$( [[ -f "$MIG_ROOT/devkit/apps.json" ]] && echo true || echo false )"
+assert_contains "migrated registry keeps the app" "legacy-app" "$mig_out"
+assert_eq "pid file carried across migration" "true" "$( [[ -f "$MIG_ROOT/.devkit/pids/legacy-app.pid" ]] && echo true || echo false )"
+# Idempotent: a second run must neither re-migrate nor error.
+mig_out2=$(env -u DEVKIT_HOME HOME="$MIG_ROOT" "$MIG_ROOT/bin/devkit" list 2>&1 || true)
+assert_not_contains "migration does not repeat" "migrating registry" "$mig_out2"
+rm -rf "$MIG_ROOT"
 
 # ---------- summary ----------
 
