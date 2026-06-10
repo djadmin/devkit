@@ -70,6 +70,22 @@ devkit register notes --path ~/code/notes --port 4010 --cmd "npm run dev -- --po
 devkit start notes
 ```
 
+### Find apps you forgot to register
+
+`devkit scan` looks for web apps already listening on localhost that aren't in the
+registry yet — useful when another tool started something with a raw `npm run dev` and a
+bare `localhost:5173`. It detects only HTTP/HTML services (databases and JSON-only APIs
+are skipped), suggests a name from the page title, and best-effort recovers the start
+command so you can register it as managed or external.
+
+```bash
+devkit scan          # human-readable table of unregistered web apps
+devkit scan --json   # machine-readable (used by the menu bar app's "Scan Now")
+```
+
+See [docs/scan.md](docs/scan.md) for detection details, tuning, and the menu bar
+integration contract.
+
 ---
 
 ## Daily Commands
@@ -86,6 +102,7 @@ devkit start notes
 | `devkit edit <name>` | Jump into the project directory with Claude Code |
 | `devkit logs <name>` | Tail the log file |
 | `devkit show <name>` | Print full stored metadata |
+| `devkit scan` | Find running web apps not yet registered |
 | `devkit rename <old> <new>` | Rename a running app safely |
 | `devkit update <name>` | Update port, cmd, path, or description |
 | `devkit remove <name>` | Deregister an app |

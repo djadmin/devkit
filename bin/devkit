@@ -115,7 +115,7 @@ ensure_registry() {
   # Catch a broken hand-edit / partial sync up front with a clear message, instead of
   # letting every downstream `jq` spew cryptic parse errors (or worse, render an empty
   # Caddyfile that silently drops every route).
-  if [[ -s "$APPS_JSON" ]] && ! jq empty "$APPS_JSON" >/dev/null 2>&1; then
+  if command -v jq >/dev/null 2>&1 && [[ -s "$APPS_JSON" ]] && ! jq empty "$APPS_JSON" >/dev/null 2>&1; then
     die "registry is not valid JSON: $APPS_JSON
   Fix the file or restore a backup. devkit won't touch routing until it parses."
   fi
@@ -697,7 +697,10 @@ scan_probe_to_file() {
   fi
   if [[ "$code" == 000 ]]; then rm -f "$hdr" "$body"; return 0; fi
 
-  ctype=$(grep -i '^content-type:' "$hdr" 2>/dev/null | tail -1 | tr -d '\r' | cut -d' ' -f2-)
+  # `|| true`: under `set -euo pipefail` a grep with no match exits 1, and because this
+  # runs in a backgrounded subshell that would kill the probe before it writes a result
+  # (silently dropping a real app). A missing header just means an empty value.
+  ctype=$(grep -i '^content-type:' "$hdr" 2>/dev/null | tail -1 | tr -d '\r' | cut -d' ' -f2-) || true
   head=$(head -c 256 "$body" 2>/dev/null | tr -d '\0')
   shopt -s nocasematch
   [[ "$ctype" == *text/html* ]] && is_html=1
@@ -705,8 +708,11 @@ scan_probe_to_file() {
   shopt -u nocasematch
   if [[ "$is_html" != 1 ]]; then rm -f "$hdr" "$body"; return 0; fi
 
+  # `|| true`: a title-less page (common for SPA shells) makes `grep -o` exit 1, which
+  # under pipefail would kill this backgrounded probe and drop the app. No title just
+  # means we fall back to a process-port name below.
   title=$(tr '\n' ' ' < "$body" 2>/dev/null | grep -i -o '<title[^>]*>[^<]*</title>' | head -1 \
-          | sed -E 's/<[^>]+>//g; s/^[[:space:]]+|[[:space:]]+$//g')
+          | sed -E 's/<[^>]+>//g; s/^[[:space:]]+|[[:space:]]+$//g') || true
   rm -f "$hdr" "$body"
 
   local slug name
@@ -727,7 +733,7 @@ scan_probe_to_file() {
 }
 
 cmd_scan() {
-  need curl
+  need jq; need curl
   ensure_registry
   local json_mode=false
   [[ "${1:-}" == "--json" ]] && json_mode=true
@@ -978,14 +984,37 @@ cmd_logs() {
 
 cmd_start_all() {
   migrate_legacy_registry
-  local started=0 failed=0
-  while IFS= read -r name; do
-    if cmd_start "$name"; then
-      (( started++ ))
-    else
-      (( failed++ )) || true
-    fi
-  done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
+  local names=()
+  while IFS= read -r name; do names+=("$name"); done \
+    < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
+  if (( ${#names[@]} == 0 )); then
+    echo "no devkit-managed apps to start"
+    return 0
+  fi
+
+  # Start apps concurrently, batched at START_CONCURRENCY, so total time is roughly
+  # the slowest app's port-bind wait instead of the sum across every app. Each app's
+  # output is captured to a temp file and replayed in registry order afterwards, so
+  # parallel launches don't interleave their messages. Mirrors cmd_scan's batching,
+  # which is bash 3.2 safe (no `wait -n`).
+  local conc="${DEVKIT_START_CONCURRENCY:-8}"
+  local workdir; workdir=$(mktemp -d)
+  local i=0 running=0
+  for name in "${names[@]}"; do
+    ( cmd_start "$name" >"$workdir/$i.out" 2>&1; echo $? >"$workdir/$i.rc" ) &
+    (( i++ )); (( running++ ))
+    if (( running >= conc )); then wait; running=0; fi
+  done
+  wait
+
+  local started=0 failed=0 idx=0
+  for name in "${names[@]}"; do
+    [[ -s "$workdir/$idx.out" ]] && cat "$workdir/$idx.out"
+    local rc; rc=$(cat "$workdir/$idx.rc" 2>/dev/null || echo 1)
+    if [[ "$rc" == 0 ]]; then (( started++ )); else (( failed++ )) || true; fi
+    (( idx++ ))
+  done
+  rm -rf "$workdir"
   local msg="started $started app(s)"
   (( failed > 0 )) && msg="$msg, $failed failed" || true
   echo "$msg"
@@ -1018,9 +1047,32 @@ cmd_stop_all() {
 
 cmd_restart_all() {
   migrate_legacy_registry
-  while IFS= read -r name; do
-    cmd_restart "$name" || true
-  done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
+  local names=()
+  while IFS= read -r name; do names+=("$name"); done \
+    < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
+  if (( ${#names[@]} == 0 )); then
+    echo "no devkit-managed apps to restart"
+    return 0
+  fi
+
+  # Restart concurrently with the same batching as cmd_start_all — a serial restart-all
+  # stacked every app's stop+bind wait end to end, which was painfully slow.
+  local conc="${DEVKIT_START_CONCURRENCY:-8}"
+  local workdir; workdir=$(mktemp -d)
+  local i=0 running=0
+  for name in "${names[@]}"; do
+    ( cmd_restart "$name" >"$workdir/$i.out" 2>&1; echo $? >"$workdir/$i.rc" ) &
+    (( i++ )); (( running++ ))
+    if (( running >= conc )); then wait; running=0; fi
+  done
+  wait
+
+  local idx=0
+  for name in "${names[@]}"; do
+    [[ -s "$workdir/$idx.out" ]] && cat "$workdir/$idx.out"
+    (( idx++ ))
+  done
+  rm -rf "$workdir"
 }
 
 # ---------- generation ----------
@@ -1645,6 +1697,7 @@ Diagnostics:
   devkit doctor             # full health check (caddy, symlink, registry, PIDs)
   devkit doctor --json      # machine-readable output for agents
   devkit doctor --history   # show past doctor run log
+  devkit scan               # detect unregistered local web apps (--json for machine output)
 
 Internals:
   devkit reload
