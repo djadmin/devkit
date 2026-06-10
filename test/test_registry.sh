@@ -502,6 +502,53 @@ mig_out2=$(env -u DEVKIT_HOME HOME="$MIG_ROOT" "$MIG_ROOT/bin/devkit" list 2>&1 
 assert_not_contains "migration does not repeat" "migrating registry" "$mig_out2"
 rm -rf "$MIG_ROOT"
 
+# -- supervisor: opt-in crash recovery --
+echo "--- supervisor: restart policy + crash recovery ---"
+assert_exit "rejects bad restart policy" 1 "$DEVKIT" register badpol --port 5413 --cmd "x" --restart sometimes
+
+SUP_HOME=$(mktemp -d); mkdir -p "$SUP_HOME/app"
+cat > "$SUP_HOME/app/serve.sh" <<'SH'
+#!/bin/sh
+exec python3 -m http.server 5412 --bind 127.0.0.1
+SH
+chmod +x "$SUP_HOME/app/serve.sh"
+DEVKIT_HOME="$SUP_HOME" "$DEVKIT" register sup --path "$SUP_HOME/app" --port 5412 --cmd "./serve.sh" --restart on-failure >/dev/null 2>&1 || true
+assert_eq "restart policy stored" "on-failure" "$(jq -r '.apps[0].restart' "$SUP_HOME/apps.json")"
+
+DEVKIT_HOME="$SUP_HOME" "$DEVKIT" start sup >/dev/null 2>&1 || true
+wait_for_port_state 5412 listening 60 >/dev/null || true
+assert_eq "want marker set on start" "true" "$( [[ -f "$SUP_HOME/supervisor/wants/sup" ]] && echo true || echo false )"
+
+# Simulate a crash, then a single supervise tick must bring it back.
+kill -9 "$(lsof -tiTCP:5412 -sTCP:LISTEN | head -1)" 2>/dev/null || true
+wait_for_port_state 5412 free 60 || true
+DEVKIT_HOME="$SUP_HOME" "$DEVKIT" supervise tick >/dev/null 2>&1 || true
+assert_nonempty "supervise tick restarts a crashed app" "$(wait_for_port_state 5412 listening 60 || true)"
+
+# A manual stop must be honoured — the supervisor must not fight it.
+DEVKIT_HOME="$SUP_HOME" "$DEVKIT" stop sup >/dev/null 2>&1 || true
+wait_for_port_state 5412 free 60 || true
+assert_eq "want marker cleared on stop" "false" "$( [[ -f "$SUP_HOME/supervisor/wants/sup" ]] && echo true || echo false )"
+DEVKIT_HOME="$SUP_HOME" "$DEVKIT" supervise tick >/dev/null 2>&1 || true
+sleep 1
+assert_eq "supervisor does not restart after manual stop" "" "$(lsof -tiTCP:5412 -sTCP:LISTEN 2>/dev/null || true)"
+DEVKIT_HOME="$SUP_HOME" "$DEVKIT" stop sup >/dev/null 2>&1 || true
+rm -rf "$SUP_HOME"
+
+echo "--- supervisor: launchd agent plist ---"
+PL_HOME=$(mktemp -d); FAKE_HOME=$(mktemp -d)
+HOME="$FAKE_HOME" DEVKIT_HOME="$PL_HOME" "$DEVKIT" supervise install >/dev/null 2>&1
+PLIST="$FAKE_HOME/Library/LaunchAgents/com.devkit.supervisor.plist"
+assert_eq "supervise install writes a plist" "true" "$( [[ -f "$PLIST" ]] && echo true || echo false )"
+if command -v python3 >/dev/null 2>&1 && [[ -f "$PLIST" ]]; then
+  set +e; python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse(sys.argv[1])" "$PLIST" >/dev/null 2>&1; xmlcode=$?; set -e
+  assert_eq "plist is well-formed XML" "0" "$xmlcode"
+fi
+assert_contains "plist invokes supervise tick" "supervise" "$(cat "$PLIST" 2>/dev/null)"
+HOME="$FAKE_HOME" DEVKIT_HOME="$PL_HOME" "$DEVKIT" supervise uninstall >/dev/null 2>&1
+assert_eq "supervise uninstall removes the plist" "false" "$( [[ -f "$PLIST" ]] && echo true || echo false )"
+rm -rf "$PL_HOME" "$FAKE_HOME"
+
 # ---------- summary ----------
 
 echo

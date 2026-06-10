@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-DEVKIT_VERSION="0.3.0"
+DEVKIT_VERSION="0.4.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -29,6 +29,21 @@ LOCK_DIR="$DEVKIT_HOME/.registry.lock"
 # Lets every command cheaply detect an out-of-band apps.json edit and self-heal.
 STAMP_FILE="$DEVKIT_HOME/.caddy.fingerprint"
 BREW_CADDYFILE="${DEVKIT_BREW_CADDYFILE:-/opt/homebrew/etc/Caddyfile}"
+
+# ── Supervisor (opt-in crash recovery) ──────────────────────────────────────
+# wants/  records desired state (set on start, cleared on stop) so the supervisor only
+#         revives apps you actually want up — it never fights a manual `devkit stop`.
+# state/  holds per-app backoff counters so a crash-looping app can't be hammered.
+WANTS_DIR="$DEVKIT_HOME/supervisor/wants"
+SUPERVISOR_STATE_DIR="$DEVKIT_HOME/supervisor/state"
+SUPERVISOR_LOCK="$DEVKIT_HOME/supervisor/.tick.lock"
+SUPERVISOR_LOG="$LOGS_DIR/_supervisor.log"
+SUPERVISOR_LABEL="com.devkit.supervisor"
+SUPERVISOR_PLIST="$HOME/Library/LaunchAgents/$SUPERVISOR_LABEL.plist"
+SUPERVISOR_INTERVAL="${DEVKIT_SUPERVISE_INTERVAL:-10}"
+SUPERVISOR_BACKOFF_BASE="${DEVKIT_SUPERVISE_BACKOFF_BASE:-5}"
+SUPERVISOR_BACKOFF_CAP="${DEVKIT_SUPERVISE_BACKOFF_CAP:-300}"
+DEVKIT_BIN_SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
 
 die() { echo "devkit: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
@@ -191,6 +206,24 @@ assert_valid_port() {
   [[ -z "$p" || "$p" == "0" ]] && return 0
   [[ "$p" =~ ^[0-9]+$ ]] && (( p >= 1 && p <= 65535 )) || die "--port must be between 1 and 65535, got: $p"
 }
+
+# Restart policy controls opt-in crash recovery. `no` (default) = devkit never revives it.
+# `on-failure`/`always` = the supervisor restarts it whenever it's down but you wanted it
+# up. (For detached local processes devkit can't read an exit code, so the two behave the
+# same here; both are accepted for familiarity and future use.)
+assert_valid_restart() {
+  case "$1" in
+    ""|no|on-failure|always) return 0 ;;
+    *) die "--restart must be one of: no, on-failure, always (got: $1)" ;;
+  esac
+}
+
+# ----- desired-state markers (used by the supervisor) -----
+ensure_supervisor_dirs() { mkdir -p "$WANTS_DIR" "$SUPERVISOR_STATE_DIR" 2>/dev/null || true; }
+want_set()   { ensure_supervisor_dirs; : > "$WANTS_DIR/$1" 2>/dev/null || true; }
+want_clear() { rm -f "$WANTS_DIR/$1" "$SUPERVISOR_STATE_DIR/$1" 2>/dev/null || true; }
+want_has()   { [[ -f "$WANTS_DIR/$1" ]]; }
+app_restart_policy() { jq -r --arg n "$1" '.apps[] | select(.name==$n) | .restart // "no"' "$APPS_JSON" 2>/dev/null; }
 
 assert_unique() {
   local name="$1" port="$2" hostname="$3"
@@ -370,7 +403,7 @@ is_running() {
 # ---------- commands ----------
 
 cmd_register() {
-  local name="" path="" port="" cmd="" claude="" repo="" desc="" managed="devkit"
+  local name="" path="" port="" cmd="" claude="" repo="" desc="" managed="devkit" restart=""
 
   # Accept positional name as first arg: devkit register my-api --port 3000 --cmd "..."
   if [[ $# -gt 0 && "$1" != --* ]]; then
@@ -387,16 +420,23 @@ cmd_register() {
       --repo)       repo="$2";    shift 2 ;;
       --desc)       desc="$2";    shift 2 ;;
       --managed-by) managed="$2"; shift 2 ;;
+      --restart)    restart="$2"; shift 2 ;;
       *) die "unknown flag: $1" ;;
     esac
   done
 
-  [[ -n "$name" ]] || die "usage: devkit register <name> --port N --cmd \"CMD\" [--path P]"
+  [[ -n "$name" ]] || die "usage: devkit register <name> --port N --cmd \"CMD\" [--path P] [--restart on-failure]"
   assert_valid_name "$name"
   assert_valid_port "$port"
+  assert_valid_restart "$restart"
 
   acquire_lock
   migrate_legacy_registry
+
+  # Re-registering is an upsert: if --restart wasn't given, keep the existing policy
+  # rather than silently resetting it to "no".
+  [[ -z "$restart" ]] && restart=$(app_restart_policy "$name")
+  [[ -z "$restart" || "$restart" == "null" ]] && restart="no"
 
   if [[ "$managed" == "devkit" ]]; then
     # Default path to current directory — so you can register from inside the project
@@ -416,7 +456,7 @@ cmd_register() {
   local tmp; tmp=$(mktemp)
   jq --arg n "$name" --arg p "$path" --arg c "${claude:-}" \
      --arg cmd "${cmd:-}" --argjson port "${port:-0}" --arg h "$hostname" \
-     --arg repo "${repo:-}" --arg desc "$desc" --arg m "$managed" \
+     --arg repo "${repo:-}" --arg desc "$desc" --arg m "$managed" --arg restart "$restart" \
     '.apps |= ((map(select(.name != $n))) + [{
        name: $n,
        hostname: $h,
@@ -426,7 +466,8 @@ cmd_register() {
        claudeMd: (if $c == "" then null else $c end),
        startCmd: (if $cmd == "" then null else $cmd end),
        description: $desc,
-       managedBy: $m
+       managedBy: $m,
+       restart: $restart
      }])' "$APPS_JSON" > "$tmp"
   mv "$tmp" "$APPS_JSON"
 
@@ -454,9 +495,11 @@ cmd_rename() {
     old_path=$(app_path "$old")
     _stop_by_name "$old" "$old_port" "$old_path" || die "$old did not stop cleanly before rename"
   fi
-  # Move PID/log files to new name
+  # Move PID/log files and supervisor markers to the new name (preserves desired state).
   [[ -f "$(pid_file "$old")" ]] && mv "$(pid_file "$old")" "$(pid_file "$new")" 2>/dev/null || true
   [[ -f "$(log_file "$old")" ]] && mv "$(log_file "$old")" "$(log_file "$new")" 2>/dev/null || true
+  if want_has "$old"; then ensure_supervisor_dirs; mv "$WANTS_DIR/$old" "$WANTS_DIR/$new" 2>/dev/null || true; fi
+  [[ -f "$SUPERVISOR_STATE_DIR/$old" ]] && mv "$SUPERVISOR_STATE_DIR/$old" "$SUPERVISOR_STATE_DIR/$new" 2>/dev/null || true
 
   local new_host="$new.$(tld)"
   local tmp; tmp=$(mktemp)
@@ -475,14 +518,14 @@ cmd_rename() {
 
 cmd_update() {
   local name="${1:-}"
-  [[ -n "$name" ]] || die "usage: devkit update <name> [--port N] [--cmd C] [--path P] [--desc D] [--managed-by M]"
+  [[ -n "$name" ]] || die "usage: devkit update <name> [--port N] [--cmd C] [--path P] [--desc D] [--managed-by M] [--restart P]"
   shift
 
   acquire_lock
   migrate_legacy_registry
   jq -e --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null 2>&1 || die "unknown app: $name"
 
-  local port="" cmd="" path="" desc="" managed=""
+  local port="" cmd="" path="" desc="" managed="" restart=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --port)       port="$2";    shift 2 ;;
@@ -490,12 +533,14 @@ cmd_update() {
       --path)       path="$2";    shift 2 ;;
       --desc)       desc="$2";    shift 2 ;;
       --managed-by) managed="$2"; shift 2 ;;
+      --restart)    restart="$2"; shift 2 ;;
       *) die "unknown flag: $1" ;;
     esac
   done
 
-  [[ -n "$port$cmd$path$desc$managed" ]] || die "nothing to update — specify at least one flag"
+  [[ -n "$port$cmd$path$desc$managed$restart" ]] || die "nothing to update — specify at least one flag"
   assert_valid_port "$port"
+  assert_valid_restart "$restart"
 
   if [[ -n "$path" ]]; then
     path="$(cd "$path" 2>/dev/null && pwd -P)" || die "path does not exist: $path"
@@ -519,14 +564,20 @@ cmd_update() {
     --arg path    "$path" \
     --arg desc    "$desc" \
     --arg managed "$managed" \
+    --arg restart "$restart" \
     '.apps |= map(if .name != $name then . else . *
       (if $port    != "" then {port: ($port | tonumber)} else {} end) *
       (if $cmd     != "" then {startCmd: $cmd}           else {} end) *
       (if $path    != "" then {path: $path}              else {} end) *
       (if $desc    != "" then {description: $desc}       else {} end) *
-      (if $managed != "" then {managedBy: $managed}      else {} end)
+      (if $managed != "" then {managedBy: $managed}      else {} end) *
+      (if $restart != "" then {restart: $restart}        else {} end)
     end)' "$APPS_JSON" > "$tmp"
   mv "$tmp" "$APPS_JSON"
+
+  # If supervision was turned off, drop any desired-state marker so the supervisor
+  # immediately stops trying to keep it alive.
+  [[ "$restart" == "no" ]] && want_clear "$name"
 
   echo "updated $name"
   cmd_reload
@@ -547,6 +598,7 @@ cmd_remove() {
     path=$(app_path "$name")
     _stop_by_name "$name" "$port" "$path" || die "$name did not stop cleanly before remove"
   fi
+  want_clear "$name"
   rm -f "$(pid_file "$name")" "$(log_file "$name")"
   local tmp; tmp=$(mktemp)
   jq --arg n "$name" '.apps |= map(select(.name != $n))' "$APPS_JSON" > "$tmp"
@@ -575,6 +627,163 @@ cmd_show() {
   [[ -n "$name" ]] || die "usage: devkit show <name>"
   ensure_registry
   jq --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON"
+}
+
+# ---------- scan: discover running web apps not yet registered ----------
+#
+# `devkit scan` answers "what's listening on a localhost port that devkit doesn't
+# know about, and which of those are web apps?" It exists for apps that were started
+# OUTSIDE devkit — e.g. a tool handed you `npm run dev` and a bare localhost:5173.
+#
+# Design notes (see docs/scan.md):
+#   * Detection is HTTP-content based: we only surface things that actually answer
+#     HTTP with HTML, so databases / gRPC / JSON APIs are excluded by construction.
+#   * Probes run in PARALLEL (batched) so total wall time is bounded by the per-port
+#     timeout, not by the number of ports. Scanning 50 ports costs ~one timeout, not 50.
+#   * It only SUGGESTS. Nothing is written to the registry; the user (or the Mac app)
+#     decides what to register.
+#   * We best-effort recover the start command (ps) and working dir (lsof) so a found
+#     app can usually be registered as devkit-managed (restartable), not just external.
+
+# Tunables (env-overridable, with safe defaults):
+SCAN_TIMEOUT="${DEVKIT_SCAN_TIMEOUT:-2}"          # seconds per HTTP probe (total)
+SCAN_CONNECT_TIMEOUT="${DEVKIT_SCAN_CONNECT_TIMEOUT:-1}"  # seconds to establish TCP
+SCAN_CONCURRENCY="${DEVKIT_SCAN_CONCURRENCY:-24}" # max parallel probes per batch
+SCAN_MIN_PORT="${DEVKIT_SCAN_MIN_PORT:-1024}"     # ignore privileged/system ports below this
+
+# Turn an arbitrary string (usually an HTML <title>) into a devkit-valid DNS slug.
+# Lowercase, non-alphanumerics -> hyphen, trim/collapse hyphens, cap length. May be
+# empty (caller falls back to process-port).
+scan_slugify() {
+  local s
+  s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  s=$(printf '%s' "$s" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+  printf '%s' "${s:0:24}" | sed -E 's/-+$//'
+}
+
+# Given a desired base name, return one that does not collide with an existing
+# registry entry (appends -2, -3, ...). Guarantees a non-empty, valid result.
+scan_unique_name() {
+  local base="$1" n i=2
+  base=$(scan_slugify "$base")
+  [[ -z "$base" ]] && base="app"
+  n="$base"
+  while jq -e --arg n "$n" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null 2>&1; do
+    n="${base}-${i}"; i=$((i + 1))
+  done
+  printf '%s' "$n"
+}
+
+# Strip leading `KEY=value` environment assignments from a captured command line so we
+# don't persist secrets (API keys, tokens) lifted from a process's argv into apps.json.
+scan_sanitize_cmd() {
+  printf '%s' "$1" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*=[^ ]* )+//'
+}
+
+# Worker: probe one port; if it's a web app, write a single JSON object to $outfile.
+# Runs backgrounded, so it must never let `set -e` abort before cleanup — every
+# fallible command is guarded. proc/pid are passed in from the lsof enumeration.
+scan_probe_to_file() {
+  local port="$1" proc="$2" pid="$3" outfile="$4"
+  local hdr body code ctype scheme=http head title is_html=0 cmd cwd
+
+  hdr=$(mktemp); body=$(mktemp)
+  code=$(curl -s -L --max-redirs 3 --connect-timeout "$SCAN_CONNECT_TIMEOUT" -m "$SCAN_TIMEOUT" \
+         -o "$body" -D "$hdr" -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null) || code=000
+  if [[ "$code" == 000 ]]; then
+    code=$(curl -sk -L --max-redirs 3 --connect-timeout "$SCAN_CONNECT_TIMEOUT" -m "$SCAN_TIMEOUT" \
+           -o "$body" -D "$hdr" -w '%{http_code}' "https://127.0.0.1:$port/" 2>/dev/null) || code=000
+    scheme=https
+  fi
+  if [[ "$code" == 000 ]]; then rm -f "$hdr" "$body"; return 0; fi
+
+  ctype=$(grep -i '^content-type:' "$hdr" 2>/dev/null | tail -1 | tr -d '\r' | cut -d' ' -f2-)
+  head=$(head -c 256 "$body" 2>/dev/null | tr -d '\0')
+  shopt -s nocasematch
+  [[ "$ctype" == *text/html* ]] && is_html=1
+  [[ "$head" == *"<!doctype"* || "$head" == *"<html"* ]] && is_html=1
+  shopt -u nocasematch
+  if [[ "$is_html" != 1 ]]; then rm -f "$hdr" "$body"; return 0; fi
+
+  title=$(tr '\n' ' ' < "$body" 2>/dev/null | grep -i -o '<title[^>]*>[^<]*</title>' | head -1 \
+          | sed -E 's/<[^>]+>//g; s/^[[:space:]]+|[[:space:]]+$//g')
+  rm -f "$hdr" "$body"
+
+  local slug name
+  slug=$(scan_slugify "$title")
+  [[ -z "$slug" ]] && slug="${proc}-${port}"
+  name=$(scan_unique_name "$slug")
+
+  cmd=$(ps -o command= -p "$pid" 2>/dev/null | sed -E 's/^[[:space:]]+//')
+  cmd=$(scan_sanitize_cmd "$cmd")
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | grep '^n' | head -1 | sed 's/^n//')
+
+  jq -n --arg name "$name" --argjson port "$port" --arg proc "$proc" \
+        --arg title "$title" --arg cmd "$cmd" --arg path "$cwd" --arg scheme "$scheme" \
+    '{suggestedName:$name, port:$port, process:$proc, title:$title,
+      startCmdHint:(if $cmd=="" then null else $cmd end),
+      pathHint:(if $path=="" then null else $path end),
+      scheme:$scheme, registered:false}' > "$outfile" 2>/dev/null || true
+}
+
+cmd_scan() {
+  need curl
+  ensure_registry
+  local json_mode=false
+  [[ "${1:-}" == "--json" ]] && json_mode=true
+
+  # Ports already in the registry — never re-surface these. (0/empty sentinel is harmless.)
+  local taken; taken=$(jq -r '.apps[].port // empty' "$APPS_JSON" 2>/dev/null | sort -un)
+
+  # Enumerate listeners once. Build "proc<TAB>pid<TAB>port", dedup by port (a server
+  # often binds IPv4+IPv6), drop system ports and already-registered ports.
+  local workdir; workdir=$(mktemp -d)
+  local seen=" " candidates=0
+  local proc pid port
+  while IFS=$'\t' read -r proc pid port; do
+    [[ "$port" =~ ^[0-9]+$ ]] || continue
+    (( port < SCAN_MIN_PORT )) && continue
+    case "$seen" in *" $port "*) continue ;; esac      # dedup by port
+    if [[ -n "$taken" ]] && grep -qx "$port" <<<"$taken"; then continue; fi
+    seen="$seen$port "
+    printf '%s\t%s\t%s\n' "$proc" "$pid" "$port" >> "$workdir/candidates"
+    candidates=$((candidates + 1))
+  done < <(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
+           | awk 'NR>1 {n=split($9,a,":"); print $1"\t"$2"\t"a[n]}')
+
+  # Probe candidates in parallel, batched at SCAN_CONCURRENCY so total time ≈ one timeout.
+  local running=0 idx=0
+  if [[ -f "$workdir/candidates" ]]; then
+    while IFS=$'\t' read -r proc pid port; do
+      idx=$((idx + 1))
+      scan_probe_to_file "$port" "$proc" "$pid" "$workdir/result-$idx.json" &
+      running=$((running + 1))
+      if (( running >= SCAN_CONCURRENCY )); then wait; running=0; fi
+    done < "$workdir/candidates"
+    wait
+  fi
+
+  # Aggregate the per-port result files into a single array, sorted by port.
+  local results="[]"
+  if ls "$workdir"/result-*.json >/dev/null 2>&1; then
+    results=$(cat "$workdir"/result-*.json | jq -s 'sort_by(.port)')
+  fi
+  rm -rf "$workdir"
+
+  if $json_mode; then
+    printf '%s\n' "$results"
+  else
+    local count; count=$(jq 'length' <<<"$results")
+    if [[ "$count" == 0 ]]; then
+      echo "No unregistered web apps found listening on localhost."
+      return 0
+    fi
+    printf "%-22s %-7s %-9s %s\n" NAME PORT PROCESS TITLE
+    jq -r '.[] | [.suggestedName,(.port|tostring),.process,(.title // "")] | @tsv' <<<"$results" \
+      | while IFS=$'\t' read -r n p pr t; do printf "%-22s %-7s %-9s %s\n" "$n" "$p" "$pr" "$t"; done
+    echo
+    echo "Register one with:  devkit register <name> --port <port> [--cmd \"...\" --path P | --managed-by external]"
+  fi
 }
 
 # ---------- process management ----------
@@ -730,6 +939,10 @@ cmd_start() {
     return 1
   fi
 
+  # Record desired state = up and clear any crash-backoff (this start is healthy).
+  want_set "$name"
+  rm -f "$SUPERVISOR_STATE_DIR/$name" 2>/dev/null || true
+
   echo "started $name (pid $pid) → $(url_for "$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .hostname' "$APPS_JSON")")"
 }
 
@@ -737,6 +950,9 @@ cmd_stop() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit stop <name>"
   migrate_legacy_registry
+  # Desired state = down. Clear it first so the supervisor won't race to restart what
+  # the user just asked to stop.
+  want_clear "$name"
   is_running "$name" || { echo "devkit: $name is not running"; return 0; }
   local port path
   port=$(app_port "$name")
@@ -779,6 +995,9 @@ cmd_stop_all() {
   migrate_legacy_registry
   local stopped=0 failed=0
   while IFS= read -r name; do
+    # stop-all means "I want everything down" — clear desired state for every managed
+    # app (even already-stopped ones) so the supervisor doesn't revive them.
+    want_clear "$name"
     if is_running "$name"; then
       local port path
       port=$(app_port "$name")
@@ -1186,15 +1405,210 @@ cmd_setup_mcp() {
     echo "  args:    $server"
     echo
     echo "  Claude Code:  claude mcp add devkit -- node \"$server\""
-    echo "  Cursor/Codex: add the same command+args to the editor's MCP config."
+    echo "  Cursor / Windsurf / other: see your agent's MCP config docs."
   fi
+}
+
+# ---------- doctor ----------
+
+# Append one JSONL record per run to ~/.devkit/.doctor.log so we can track over time
+# which checks fire most often and whether the command is helping catch real issues.
+# Completely silent -- never fails the parent command.
+_doctor_log() {
+  local issues=$1; shift
+  local log="$DEVKIT_HOME/.doctor.log"
+  mkdir -p "$DEVKIT_HOME" 2>/dev/null || return 0
+  local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
+  local failed_json=""
+  for entry in "$@"; do
+    local status label
+    IFS='|' read -r status label _ <<< "$entry"
+    [[ "$status" != "ok" ]] && failed_json="${failed_json:+$failed_json,}\"$label\""
+  done
+  printf '{"ts":"%s","issues":%d,"failed":[%s]}\n' "$ts" "$issues" "$failed_json" \
+    >> "$log" 2>/dev/null || true
+}
+
+# devkit doctor -- full system health check.
+#
+# Exit 0 = all checks passed; non-zero = at least one failure.
+# --json     machine-readable output (for agents / CI)
+# --history  show past runs from the log
+cmd_doctor() {
+  if [[ "${1:-}" == "--history" ]]; then
+    local log="$DEVKIT_HOME/.doctor.log"
+    if [[ ! -f "$log" ]]; then
+      echo "No doctor runs recorded yet."; return 0
+    fi
+    echo "Recent devkit doctor runs (newest last):"
+    echo
+    while IFS= read -r line; do
+      local ts issues failed
+      ts=$(printf '%s' "$line" | jq -r '.ts // "?"' 2>/dev/null)
+      issues=$(printf '%s' "$line" | jq -r '.issues // "?"' 2>/dev/null)
+      failed=$(printf '%s' "$line" | jq -r '.failed | join(", ")' 2>/dev/null)
+      if [[ "$issues" == "0" ]]; then
+        printf "  %s  all clear\n" "$ts"
+      else
+        printf "  %s  %s issue(s) -- %s\n" "$ts" "$issues" "${failed:-unknown}"
+      fi
+    done < "$log"
+    return 0
+  fi
+
+  local json_mode=false
+  [[ "${1:-}" == "--json" ]] && json_mode=true
+
+  local issues=0
+  # Each entry: "status|label|detail"  (status: ok | warn | fail)
+  local checks=()
+
+  _chk() {
+    local status=$1 label=$2 detail=$3
+    checks+=("$status|$label|$detail")
+    [[ "$status" == "fail" ]] && (( issues++ )) || true
+  }
+
+  ensure_registry 2>/dev/null || true
+
+  # 1. Caddy installed
+  if command -v caddy >/dev/null 2>&1; then
+    local cver; cver=$(caddy version 2>/dev/null | head -1 || echo "unknown")
+    _chk ok "caddy installed" "$cver"
+  else
+    _chk fail "caddy installed" "not found -- run: devkit bootstrap"
+  fi
+
+  # 2. Caddy running (admin API reachable)
+  local admin_addr="${DEVKIT_CADDY_ADMIN:-localhost:2019}"
+  if curl -sf --max-time 1 "http://$admin_addr/config/" >/dev/null 2>&1; then
+    _chk ok "caddy running" "admin API reachable at $admin_addr"
+  else
+    _chk fail "caddy running" "admin API unreachable -- run: sudo brew services start caddy"
+  fi
+
+  # 3. Caddyfile symlink
+  if [[ -L "$BREW_CADDYFILE" ]]; then
+    local linked; linked=$(readlink "$BREW_CADDYFILE")
+    if [[ "$linked" == "$CADDYFILE" ]]; then
+      _chk ok "caddyfile symlink" "$BREW_CADDYFILE -> $CADDYFILE"
+    else
+      _chk fail "caddyfile symlink" "points to $linked, not $CADDYFILE -- run: devkit bootstrap"
+    fi
+  elif [[ -e "$BREW_CADDYFILE" ]]; then
+    _chk fail "caddyfile symlink" "$BREW_CADDYFILE exists but is not a symlink -- run: devkit bootstrap"
+  else
+    _chk fail "caddyfile symlink" "$BREW_CADDYFILE missing -- run: devkit bootstrap"
+  fi
+
+  # 4. Caddyfile fresh (fingerprint matches apps.json)
+  if [[ ! -f "$APPS_JSON" ]]; then
+    _chk warn "caddyfile fresh" "no apps.json yet -- run devkit register to get started"
+  elif registry_is_stale 2>/dev/null; then
+    _chk fail "caddyfile fresh" "apps.json changed since last reload -- run: devkit reload"
+  else
+    _chk ok "caddyfile fresh" "fingerprint matches apps.json"
+  fi
+
+  # 5. Orphaned PID files
+  local orphan_list=""
+  if [[ -f "$APPS_JSON" ]]; then
+    while IFS= read -r name; do
+      local pf; pf=$(pid_file "$name")
+      if [[ -f "$pf" ]]; then
+        local pid; pid=$(cat "$pf" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+          orphan_list="${orphan_list:+$orphan_list, }$name (pid $pid)"
+        fi
+      fi
+    done < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON" 2>/dev/null || true)
+  fi
+  if [[ -z "$orphan_list" ]]; then
+    _chk ok "orphaned pids" "none"
+  else
+    _chk warn "orphaned pids" "$orphan_list -- run: devkit restart <name>"
+  fi
+
+  # 6. Port conflicts in registry
+  local conflict_list=""
+  if [[ -f "$APPS_JSON" ]]; then
+    while IFS= read -r port; do
+      [[ -z "$port" || "$port" == "0" || "$port" == "null" ]] && continue
+      local names_on_port
+      names_on_port=$(jq -r --argjson p "$port" '.apps[] | select(.port==$p) | .name' "$APPS_JSON" 2>/dev/null | paste -sd ',' -)
+      local count
+      count=$(printf '%s\n' "$names_on_port" | tr ',' '\n' | grep -c . || echo 0)
+      if (( count > 1 )); then
+        conflict_list="${conflict_list:+$conflict_list; }port $port: $names_on_port"
+      fi
+    done < <(jq -r '[.apps[].port] | unique[]' "$APPS_JSON" 2>/dev/null || true)
+  fi
+  if [[ -z "$conflict_list" ]]; then
+    _chk ok "port conflicts" "none"
+  else
+    _chk fail "port conflicts" "$conflict_list -- use devkit remove to fix"
+  fi
+
+  # 7. Registry JSON valid
+  if [[ ! -f "$APPS_JSON" ]]; then
+    _chk warn "registry valid" "no apps.json yet (devkit register to create one)"
+  elif jq empty "$APPS_JSON" >/dev/null 2>&1; then
+    local app_count; app_count=$(jq '.apps | length' "$APPS_JSON" 2>/dev/null || echo "?")
+    _chk ok "registry valid" "$app_count app(s) at $APPS_JSON"
+  else
+    _chk fail "registry valid" "apps.json is not valid JSON -- fix or restore from backup"
+  fi
+
+  # Output
+  if [[ "$json_mode" == true ]]; then
+    local json_checks="["
+    local first=true
+    for entry in "${checks[@]}"; do
+      local status label detail
+      IFS='|' read -r status label detail <<< "$entry"
+      [[ "$first" == true ]] && first=false || json_checks+=","
+      json_checks+="{\"status\":$(printf '%s' "$status" | jq -Rs .),\"check\":$(printf '%s' "$label" | jq -Rs .),\"detail\":$(printf '%s' "$detail" | jq -Rs .)}"
+    done
+    json_checks+="]"
+    printf '{"issues":%d,"checks":%s}\n' "$issues" "$json_checks"
+  else
+    local GREEN RED YELLOW BOLD RESET
+    GREEN=$(printf '\033[32m')
+    RED=$(printf '\033[31m')
+    YELLOW=$(printf '\033[33m')
+    BOLD=$(printf '\033[1m')
+    RESET=$(printf '\033[0m')
+
+    printf "\n  devkit doctor\n\n"
+    for entry in "${checks[@]}"; do
+      local status label detail icon color
+      IFS='|' read -r status label detail <<< "$entry"
+      case "$status" in
+        ok)   icon="ok  "; color="$GREEN" ;;
+        warn) icon="warn"; color="$YELLOW" ;;
+        fail) icon="FAIL"; color="$RED" ;;
+        *)    icon="?   "; color="" ;;
+      esac
+      printf "  %s%s%s  %-24s  %s\n" "$color" "$icon" "$RESET" "$label" "$detail"
+    done
+    printf "\n"
+    if [[ "$issues" -eq 0 ]]; then
+      printf "  %sAll checks passed.%s\n\n" "$GREEN" "$RESET"
+    else
+      printf "  %s%d check(s) failed.%s Run the suggested commands above to fix.\n\n" "$RED" "$issues" "$RESET"
+    fi
+    printf "  Tip: run %sdevkit doctor --history%s to see past runs.\n\n" "$BOLD" "$RESET"
+  fi
+
+  _doctor_log "$issues" "${checks[@]}" 2>/dev/null || true
+  return "$issues"
 }
 
 # ---------- help ----------
 
 cmd_help() {
   cat <<'OUT'
-devkit — local app registry, hostname proxy, process manager, dashboard
+devkit -- local app registry, hostname proxy, process manager, dashboard
 
 Registry:
   devkit register <name> --port N --cmd "C" [--path P] [--repo URL] [--desc "..."]
@@ -1204,6 +1618,8 @@ Registry:
   devkit remove <name>
   devkit list
   devkit show <name>
+  devkit scan                 # find running web apps not yet registered
+  devkit scan --json          # machine-readable output (for the menu bar app / agents)
 
 Process:
   devkit start <name>
@@ -1225,6 +1641,11 @@ Sync / portability:
 AI agent integration:
   devkit setup-mcp          # register the devkit MCP server with Claude Code / your agent
 
+Diagnostics:
+  devkit doctor             # full health check (caddy, symlink, registry, PIDs)
+  devkit doctor --json      # machine-readable output for agents
+  devkit doctor --history   # show past doctor run log
+
 Internals:
   devkit reload
   devkit version
@@ -1235,7 +1656,7 @@ cmd_version() { echo "devkit $DEVKIT_VERSION"; }
 
 # Self-heal stale routing before any command that depends on the proxy being correct.
 # Mutating commands (register/rename/update/remove) re-render at the end via cmd_reload,
-# so they don't need this — but every read/lifecycle path does, which is what closes the
+# so they don't need this -- but every read/lifecycle path does, which is what closes the
 # "apps.json edited outside devkit" gap regardless of which command the user runs.
 case "${1:-help}" in
   start|stop|restart|start-all|stop-all|restart-all|list|show|open|logs|clone|clone-all|edit)
@@ -1250,6 +1671,7 @@ case "${1:-help}" in
   remove)      shift; cmd_remove "$@" ;;
   list)        cmd_list ;;
   show)        shift; cmd_show "$@" ;;
+  scan)        shift; cmd_scan "$@" ;;
   reload)      cmd_reload ;;
   bootstrap)   cmd_bootstrap ;;
   start)       shift; cmd_start "$@" ;;
@@ -1265,7 +1687,9 @@ case "${1:-help}" in
   clone-all)   cmd_clone_all ;;
   paths)       cmd_paths ;;
   setup-mcp)   cmd_setup_mcp ;;
+  doctor)      shift; cmd_doctor "$@" ;;
   version|--version|-v) cmd_version ;;
   help|--help|-h) cmd_help ;;
   *) echo "devkit: unknown command: $1" >&2; cmd_help; exit 2 ;;
 esac
+
