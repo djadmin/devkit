@@ -13,8 +13,7 @@ DEVKIT_VERSION="0.4.0"
 
 # Resolve symlinks so REPO_HOME points at the real source checkout, not the symlink's
 # directory. The installer links ~/.local/bin/devkit -> ~/.local/share/devkit/bin/devkit,
-# so without this REPO_HOME would be ~/.local and every REPO_HOME-relative path (the MCP
-# server lookup in setup-mcp, bundled docs, ...) would miss.
+# so without this REPO_HOME would be ~/.local and every REPO_HOME-relative path would miss.
 _devkit_source="${BASH_SOURCE[0]}"
 while [ -L "$_devkit_source" ]; do
   _devkit_dir="$(cd -P "$(dirname "$_devkit_source")" && pwd)"
@@ -601,7 +600,7 @@ cmd_list() {
   [[ "${1:-}" == "--json" ]] && json_mode=true
 
   if $json_mode; then
-    # Machine-readable view for the app / MCP, so they consume devkit's own state instead
+    # Machine-readable view so other tools (CI, a UI) consume devkit's own state instead
     # of re-deriving it (and drifting). One JSON object per app, including the failed-start
     # reason and the log path so a UI can link straight to the dead end's cause.
     local objs=()
@@ -1499,59 +1498,6 @@ STAMP_FILE=$STAMP_FILE
 OUT
 }
 
-# ---------- MCP integration ----------
-
-# Wire the devkit MCP server into an AI agent so it can register/manage apps as
-# structured tool calls (instead of relying on a CLAUDE.md text instruction).
-cmd_setup_mcp() {
-  # Prefer a local checkout (handy during development); otherwise run the published
-  # package with `npx -y devkit-mcp`, so a standalone CLI install needs nothing extra.
-  # Either way the agent gets the same stdio MCP server.
-  local candidates=(
-    "$REPO_HOME/../devkit-mcp/index.js"
-    "$REPO_HOME/devkit-mcp/index.js"
-    "$DEVKIT_HOME/devkit-mcp/index.js"
-  )
-  local server="" c
-  for c in "${candidates[@]}"; do
-    if [[ -f "$c" ]]; then server="$(cd "$(dirname "$c")" && pwd)/index.js"; break; fi
-  done
-
-  local -a runcmd
-  if [[ -n "$server" ]]; then
-    need node
-    # Install deps if missing, else the server crashes with "Cannot find module
-    # @modelcontextprotocol/sdk" on first call.
-    local server_dir; server_dir=$(dirname "$server")
-    if [[ ! -d "$server_dir/node_modules/@modelcontextprotocol" ]]; then
-      need npm
-      echo "installing devkit MCP dependencies..."
-      (cd "$server_dir" && npm install --silent) || die "npm install failed in $server_dir"
-    fi
-    runcmd=(node "$server")
-  else
-    # Unscoped "devkit-mcp" is taken by an unrelated package on npm, so we publish under
-    # the @djadmin scope. npx fetches it on first use (then caches).
-    need npx
-    runcmd=(npx -y @djadmin/devkit-mcp)
-  fi
-
-  if command -v claude >/dev/null 2>&1; then
-    if claude mcp add devkit -- "${runcmd[@]}"; then
-      echo "devkit MCP registered with Claude Code (${runcmd[*]}). Restart Claude Code to load it."
-    else
-      die "failed to register the MCP with Claude Code (try: claude mcp add devkit -- ${runcmd[*]})"
-    fi
-  else
-    echo "Claude Code CLI not found. Add the devkit MCP to your agent manually:"
-    echo "  command: ${runcmd[0]}"
-    echo "  args:    ${runcmd[*]:1}"
-    echo
-    echo "  Claude Code:  claude mcp add devkit -- ${runcmd[*]}"
-    echo "  Cursor / Windsurf / other: see your agent's MCP config docs."
-  fi
-}
-
 # ---------- doctor ----------
 
 # Append one JSONL record per run to ~/.devkit/.doctor.log so we can track over time
@@ -1782,9 +1728,6 @@ Sync / portability:
   devkit bootstrap
   devkit paths
 
-AI agent integration:
-  devkit setup-mcp          # register the devkit MCP server with Claude Code / your agent
-
 Diagnostics:
   devkit doctor             # full health check (caddy, symlink, registry, PIDs)
   devkit doctor --json      # machine-readable output for agents
@@ -1831,7 +1774,6 @@ case "${1:-help}" in
   clone)       shift; cmd_clone "$@" ;;
   clone-all)   cmd_clone_all ;;
   paths)       cmd_paths ;;
-  setup-mcp)   cmd_setup_mcp ;;
   doctor)      shift; cmd_doctor "$@" ;;
   version|--version|-v) cmd_version ;;
   help|--help|-h) cmd_help ;;

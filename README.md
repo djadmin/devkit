@@ -20,8 +20,6 @@ brew install devkit
 devkit bootstrap
 ```
 
-The Mac app (menu bar + full window) is available separately at [djadmin.github.io/devkit](https://djadmin.github.io/devkit).
-
 ---
 
 ## Wire Your AI Agent (do this first)
@@ -80,11 +78,10 @@ command so you can register it as managed or external.
 
 ```bash
 devkit scan          # human-readable table of unregistered web apps
-devkit scan --json   # machine-readable (used by the menu bar app's "Scan Now")
+devkit scan --json   # machine-readable output
 ```
 
-See [docs/scan.md](docs/scan.md) for detection details, tuning, and the menu bar
-integration contract.
+See [docs/scan.md](docs/scan.md) for detection details and tuning.
 
 ---
 
@@ -167,11 +164,6 @@ Override the location with `DEVKIT_HOME` (e.g. `export DEVKIT_HOME="$XDG_DATA_HO
 The binary itself lives wherever your install method puts it — `/opt/homebrew/bin/devkit`
 (Homebrew), `~/.local/bin/devkit` (install script), or `bin/devkit` in a source checkout.
 `devkit paths` prints exactly where everything is.
-
-> **Upgrading from an older devkit?** Earlier versions stored data in `~/devkit`. The
-> first time you run any command, devkit moves your registry to `~/.devkit` automatically
-> and leaves the old binary/checkout untouched. You can then remove the stale
-> `export PATH=".../devkit/bin:$PATH"` line from your shell rc if the installer added one.
 
 ---
 
