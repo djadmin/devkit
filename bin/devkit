@@ -24,9 +24,8 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_devkit_source")" && pwd)"
 REPO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Did the user pin DEVKIT_HOME themselves? If so we never auto-migrate or second-guess
-# it. Capture this BEFORE applying the default so the two cases stay distinguishable.
-if [[ -n "${DEVKIT_HOME:-}" ]]; then DEVKIT_HOME_EXPLICIT=1; else DEVKIT_HOME_EXPLICIT=0; fi
+# Data lives in ~/.devkit by default (override with DEVKIT_HOME). This is the single
+# canonical location — there is no legacy path and no migration. Keep it that way.
 DEVKIT_HOME="${DEVKIT_HOME:-$HOME/.devkit}"
 
 APPS_JSON="$DEVKIT_HOME/apps.json"
@@ -80,49 +79,8 @@ ensure_registry_dir() {
   mkdir -p "$DEVKIT_HOME" "$PIDS_DIR" "$LOGS_DIR" "$STATUS_DIR" 2>/dev/null || true
 }
 
-# One-time move of an old-style registry into the new default location (~/.devkit).
-#
-# Earlier versions defaulted DEVKIT_HOME to the install/checkout directory, so data
-# landed in ~/devkit (or wherever the repo was cloned). That pollutes $HOME with a
-# visible folder and breaks the moment the binary moves (Homebrew, ~/.local/bin). We
-# now keep data in ~/.devkit and migrate the old registry across the first time we run.
-#
-# Self-guarding and idempotent: returns immediately once ~/.devkit/apps.json exists, or
-# if the user pinned DEVKIT_HOME themselves. Caddyfile/dashboard are regenerated rather
-# than moved, so we only relocate the source of truth plus live runtime state.
-migrate_home_location() {
-  [[ "$DEVKIT_HOME_EXPLICIT" == "0" ]] || return 0
-  [[ -f "$APPS_JSON" ]] && return 0
-
-  local legacy="" cand
-  for cand in "$HOME/devkit" "$REPO_HOME"; do
-    [[ "$cand" == "$DEVKIT_HOME" ]] && continue
-    if [[ -f "$cand/apps.json" ]]; then legacy="$cand"; break; fi
-  done
-  [[ -n "$legacy" ]] || return 0
-
-  mkdir -p "$DEVKIT_HOME" "$PIDS_DIR" "$LOGS_DIR" 2>/dev/null || return 0
-  echo "devkit: migrating registry from $legacy → $DEVKIT_HOME (one-time)" >&2
-
-  mv "$legacy/apps.json" "$APPS_JSON" 2>/dev/null || cp "$legacy/apps.json" "$APPS_JSON" 2>/dev/null || return 0
-  if [[ -d "$legacy/pids" ]]; then mv "$legacy/pids/"*.pid "$PIDS_DIR/" 2>/dev/null || true; fi
-  if [[ -d "$legacy/logs" ]]; then mv "$legacy/logs/"*.log "$LOGS_DIR/" 2>/dev/null || true; fi
-
-  # If Caddy was pointed at the old generated config via the brew symlink, repoint it
-  # so reloads keep working. The new Caddyfile is regenerated on the next render.
-  local linked; linked=$(readlink "$BREW_CADDYFILE" 2>/dev/null || true)
-  if [[ "$linked" == "$legacy/Caddyfile" ]]; then
-    ln -sfn "$CADDYFILE" "$BREW_CADDYFILE" 2>/dev/null || true
-  fi
-  # Drop now-stale generated artifacts at the old location (registry already moved).
-  rm -f "$legacy/Caddyfile" "$legacy/dashboard.html" "$legacy/.caddy.fingerprint" 2>/dev/null || true
-
-  echo "devkit: migration complete — the binary/checkout at $legacy is left untouched." >&2
-}
-
 ensure_registry() {
   ensure_registry_dir
-  migrate_home_location
   if [[ ! -f "$APPS_JSON" ]]; then
     echo '{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[]}' > "$APPS_JSON" 2>/dev/null || true
   fi
@@ -140,9 +98,8 @@ ensure_registry() {
 # process is dead. Without this, the menu bar app's polling plus a concurrent CLI write
 # can interleave two read-modify-write cycles and silently drop an app from apps.json.
 acquire_lock() {
-  # Reentrant within a single process: once held, nested callers (e.g. the legacy
-  # migration invoked from inside a register) are no-ops. The lock is process-scoped
-  # and released by the EXIT trap, which is exactly the lifetime of one CLI invocation.
+  # Reentrant within a single process: once held, nested callers are no-ops. The lock is
+  # process-scoped and released by the EXIT trap, the lifetime of one CLI invocation.
   [[ "${LOCK_HELD:-0}" == "1" ]] && return 0
   ensure_registry_dir
   local timeout="${1:-100}" i=0
@@ -168,19 +125,6 @@ acquire_lock() {
 release_lock() {
   rm -rf "$LOCK_DIR" 2>/dev/null || true
   LOCK_HELD=0
-}
-
-migrate_legacy_registry() {
-  ensure_registry
-  jq -e '.apps[]? | select(.managedBy == "pm2")' "$APPS_JSON" >/dev/null 2>&1 || return 0
-
-  # This is a read-modify-write of apps.json. Take the lock so a concurrent writer
-  # (another CLI run, or the menu bar app) can't lose an update. acquire_lock is
-  # reentrant, so this is a no-op when a mutating command already holds it.
-  acquire_lock
-  local tmp; tmp=$(mktemp)
-  jq '.apps |= map(if .managedBy == "pm2" then .managedBy = "devkit" else . end)' "$APPS_JSON" > "$tmp"
-  mv "$tmp" "$APPS_JSON"
 }
 
 cfg() { jq -r "$1" "$APPS_JSON"; }
@@ -481,7 +425,7 @@ cmd_register() {
   assert_valid_restart "$restart"
 
   acquire_lock
-  migrate_legacy_registry
+  ensure_registry
 
   # Re-registering is an upsert: if --restart wasn't given, keep the existing policy
   # rather than silently resetting it to "no".
@@ -529,7 +473,7 @@ cmd_rename() {
   local old="${1:-}" new="${2:-}"
   [[ -n "$old" && -n "$new" ]] || die "usage: devkit rename <old> <new>"
   acquire_lock
-  migrate_legacy_registry
+  ensure_registry
 
   assert_valid_name "$new"
   jq -e --arg n "$old" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null || die "unknown app: $old"
@@ -573,7 +517,7 @@ cmd_update() {
   shift
 
   acquire_lock
-  migrate_legacy_registry
+  ensure_registry
   jq -e --arg n "$name" '.apps[] | select(.name==$n)' "$APPS_JSON" >/dev/null 2>&1 || die "unknown app: $name"
 
   local port="" cmd="" path="" desc="" managed="" restart=""
@@ -642,7 +586,7 @@ cmd_remove() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit remove <name>"
   acquire_lock
-  migrate_legacy_registry
+  ensure_registry
   if is_running "$name"; then
     local port path
     port=$(app_port "$name")
@@ -965,7 +909,7 @@ _stop_by_name() {
 cmd_start() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit start <name>"
-  migrate_legacy_registry
+  ensure_registry
 
   local managed
   managed=$(jq -r --arg n "$name" '.apps[] | select(.name==$n) | .managedBy' "$APPS_JSON")
@@ -1077,7 +1021,7 @@ cmd_start() {
 cmd_stop() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: devkit stop <name>"
-  migrate_legacy_registry
+  ensure_registry
   # Desired state = down. Clear it first so the supervisor won't race to restart what
   # the user just asked to stop.
   want_clear "$name"
@@ -1125,7 +1069,7 @@ cmd_logs() {
 }
 
 cmd_start_all() {
-  migrate_legacy_registry
+  ensure_registry
   local names=()
   while IFS= read -r name; do names+=("$name"); done \
     < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
@@ -1163,7 +1107,7 @@ cmd_start_all() {
 }
 
 cmd_stop_all() {
-  migrate_legacy_registry
+  ensure_registry
   local stopped=0 failed=0
   while IFS= read -r name; do
     # stop-all means "I want everything down" — clear desired state for every managed
@@ -1188,7 +1132,7 @@ cmd_stop_all() {
 }
 
 cmd_restart_all() {
-  migrate_legacy_registry
+  ensure_registry
   local names=()
   while IFS= read -r name; do names+=("$name"); done \
     < <(jq -r '.apps[] | select(.managedBy=="devkit") | .name' "$APPS_JSON")
@@ -1574,7 +1518,6 @@ cmd_setup_mcp() {
     "$REPO_HOME/mcp-server/index.js"
     "$DEVKIT_HOME/devkit-mcp/index.js"
     "$DEVKIT_HOME/mcp-server/index.js"
-    "$HOME/devkit/mcp-server/index.js"
   )
   local server="" c
   for c in "${candidates[@]}"; do

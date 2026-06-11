@@ -486,24 +486,21 @@ assert_contains "default data dir is ~/.devkit" "DEVKIT_HOME=$DEF_ROOT/.devkit" 
 assert_contains "apps.json lives under ~/.devkit" "APPS_JSON=$DEF_ROOT/.devkit/apps.json" "$def_out"
 rm -rf "$DEF_ROOT"
 
-# -- one-time migration from a legacy ~/devkit location --
-echo "--- legacy home migration ---"
-MIG_ROOT=$(mktemp -d)
-mkdir -p "$MIG_ROOT/bin" "$MIG_ROOT/devkit/pids" "$MIG_ROOT/devkit/logs"
-cp "$DEVKIT" "$MIG_ROOT/bin/devkit"
-cat > "$MIG_ROOT/devkit/apps.json" <<'JSON'
-{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[{"name":"legacy-app","hostname":"legacy-app.localhost","port":5320,"path":null,"repo":null,"claudeMd":null,"startCmd":null,"description":"","managedBy":"external"}]}
+# -- no legacy migration: ~/.devkit is the only home; an old ~/devkit is ignored --
+# Guards against ever re-introducing the legacy ~/devkit -> ~/.devkit migration.
+echo "--- no legacy migration ---"
+NL_ROOT=$(mktemp -d)
+mkdir -p "$NL_ROOT/bin" "$NL_ROOT/devkit"
+cp "$DEVKIT" "$NL_ROOT/bin/devkit"
+cat > "$NL_ROOT/devkit/apps.json" <<'JSON'
+{"version":1,"proxyPort":80,"tld":"localhost","dashboardHost":"dash","apps":[{"name":"old-app","hostname":"old-app.localhost","port":5320,"path":null,"repo":null,"claudeMd":null,"startCmd":null,"description":"","managedBy":"external"}]}
 JSON
-echo "5320" > "$MIG_ROOT/devkit/pids/legacy-app.pid"
-mig_out=$(env -u DEVKIT_HOME HOME="$MIG_ROOT" "$MIG_ROOT/bin/devkit" list 2>&1 || true)
-assert_eq "registry migrated into ~/.devkit" "true" "$( [[ -f "$MIG_ROOT/.devkit/apps.json" ]] && echo true || echo false )"
-assert_eq "legacy apps.json moved out" "false" "$( [[ -f "$MIG_ROOT/devkit/apps.json" ]] && echo true || echo false )"
-assert_contains "migrated registry keeps the app" "legacy-app" "$mig_out"
-assert_eq "pid file carried across migration" "true" "$( [[ -f "$MIG_ROOT/.devkit/pids/legacy-app.pid" ]] && echo true || echo false )"
-# Idempotent: a second run must neither re-migrate nor error.
-mig_out2=$(env -u DEVKIT_HOME HOME="$MIG_ROOT" "$MIG_ROOT/bin/devkit" list 2>&1 || true)
-assert_not_contains "migration does not repeat" "migrating registry" "$mig_out2"
-rm -rf "$MIG_ROOT"
+nl_out=$(env -u DEVKIT_HOME HOME="$NL_ROOT" "$NL_ROOT/bin/devkit" list 2>&1 || true)
+assert_eq "uses ~/.devkit as the only home" "true" "$( [[ -f "$NL_ROOT/.devkit/apps.json" ]] && echo true || echo false )"
+assert_eq "legacy ~/devkit is left untouched" "true" "$( [[ -f "$NL_ROOT/devkit/apps.json" ]] && echo true || echo false )"
+assert_not_contains "no migration is performed" "migrat" "$nl_out"
+assert_not_contains "legacy app is not adopted" "old-app" "$nl_out"
+rm -rf "$NL_ROOT"
 
 # -- supervisor: opt-in crash recovery --
 # The `supervise` subcommand is not currently shipped in bin/devkit. Guard the whole

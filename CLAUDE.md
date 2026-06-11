@@ -16,6 +16,20 @@ Core primitives:
 - a generated dashboard at `http://dash.localhost`
 - `devkit edit <name>` → drops into project with Claude Code running
 
+## Storage layout (canonical — no legacy)
+
+- **Data** lives in `~/.devkit` (override with `DEVKIT_HOME`): `apps.json`, generated
+  `Caddyfile`/`dashboard.html`, `pids/`, `logs/`, lock + fingerprint. This is the single
+  source of truth and survives reinstalls.
+- **Code** (the binary + checkout) lives separately, e.g. `~/.local/share/devkit` with a
+  symlink at `~/.local/bin/devkit`. Resolve the symlink before deriving `REPO_HOME`.
+
+There is intentionally **one** location and **no migration code**. The old `~/devkit`
+fallback and the pm2-era `managedBy` converter were deleted. Do not reintroduce a
+migration or a second layout — if the location ever must change, that is a deliberate,
+separate decision, not silent auto-migration (a regression test in `test_registry.sh`
+asserts a stray `~/devkit` is ignored, not adopted).
+
 ## Source of truth
 
 The live registry is `apps.json`, which is local-only and gitignored.
