@@ -11,6 +11,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # publish the GitHub release with the built-in token
     steps:
       - uses: actions/checkout@v4
 
