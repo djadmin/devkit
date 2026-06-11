@@ -11,7 +11,17 @@ set -euo pipefail
 
 DEVKIT_VERSION="0.4.0"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so REPO_HOME points at the real source checkout, not the symlink's
+# directory. The installer links ~/.local/bin/devkit -> ~/.local/share/devkit/bin/devkit,
+# so without this REPO_HOME would be ~/.local and every REPO_HOME-relative path (the MCP
+# server lookup in setup-mcp, bundled docs, ...) would miss.
+_devkit_source="${BASH_SOURCE[0]}"
+while [ -L "$_devkit_source" ]; do
+  _devkit_dir="$(cd -P "$(dirname "$_devkit_source")" && pwd)"
+  _devkit_source="$(readlink "$_devkit_source")"
+  [[ "$_devkit_source" != /* ]] && _devkit_source="$_devkit_dir/$_devkit_source"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_devkit_source")" && pwd)"
 REPO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Did the user pin DEVKIT_HOME themselves? If so we never auto-migrate or second-guess
