@@ -21,15 +21,33 @@ jobs:
         run: |
           command -v caddy >/dev/null 2>&1 || brew install caddy
 
+      - name: Guard against committing private / generated files
+        run: |
+          # Fail if anything machine-specific, generated, or paid ever gets tracked.
+          # .gitignore stops accidental `git add`; this catches a file already committed.
+          forbidden=$(git ls-files | grep -E '(^|/)apps\.json$|^pids/|^logs/|^Caddyfile$|^dashboard\.html$|^\.claude/|(^|/)\.DS_Store$' || true)
+          # The paid Mac app lives in the private devkit-app repo; only MenuBarApp/docs/ is public.
+          paid=$(git ls-files 'MenuBarApp/*' | grep -vE '^MenuBarApp/docs/' || true)
+          if [ -n "$forbidden$paid" ]; then
+            echo "::error::forbidden files are tracked in this public repo:"
+            printf '%s\n' "$forbidden" "$paid"
+            exit 1
+          fi
+          echo "repo hygiene OK"
+
       - name: Syntax check CLI and tests
         run: |
           bash -n bin/devkit
           bash -n install.sh
           bash -n test/test_registry.sh
+          bash -n test/test_scan.sh
           bash -n test/test_install.sh
 
       - name: Run CLI integration suite
         run: bash test/test_registry.sh
+
+      - name: Run scan suite
+        run: bash test/test_scan.sh
 
       - name: Run installer smoke test
         run: bash test/test_install.sh

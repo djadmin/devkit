@@ -43,19 +43,12 @@ LOCK_DIR="$DEVKIT_HOME/.registry.lock"
 STAMP_FILE="$DEVKIT_HOME/.caddy.fingerprint"
 BREW_CADDYFILE="${DEVKIT_BREW_CADDYFILE:-/opt/homebrew/etc/Caddyfile}"
 
-# ── Supervisor (opt-in crash recovery) ──────────────────────────────────────
-# wants/  records desired state (set on start, cleared on stop) so the supervisor only
-#         revives apps you actually want up — it never fights a manual `devkit stop`.
-# state/  holds per-app backoff counters so a crash-looping app can't be hammered.
+# Desired-state markers. `wants/` records which apps were last started vs stopped. These
+# are advisory only today (written on start/stop, read by nothing) — kept as the seam for
+# a future reliability layer, which will be process-compose, not a hand-rolled supervisor.
+# TODO: fully remove these + the inert `restart` policy in a focused pass.
 WANTS_DIR="$DEVKIT_HOME/supervisor/wants"
 SUPERVISOR_STATE_DIR="$DEVKIT_HOME/supervisor/state"
-SUPERVISOR_LOCK="$DEVKIT_HOME/supervisor/.tick.lock"
-SUPERVISOR_LOG="$LOGS_DIR/_supervisor.log"
-SUPERVISOR_LABEL="com.devkit.supervisor"
-SUPERVISOR_PLIST="$HOME/Library/LaunchAgents/$SUPERVISOR_LABEL.plist"
-SUPERVISOR_INTERVAL="${DEVKIT_SUPERVISE_INTERVAL:-10}"
-SUPERVISOR_BACKOFF_BASE="${DEVKIT_SUPERVISE_BACKOFF_BASE:-5}"
-SUPERVISOR_BACKOFF_CAP="${DEVKIT_SUPERVISE_BACKOFF_CAP:-300}"
 DEVKIT_BIN_SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
 
 die() { echo "devkit: $*" >&2; exit 1; }
@@ -382,7 +375,6 @@ is_running() {
 #   stopped  — managed, down, no recorded failure (identical to never-started)
 app_state() {
   local name="$1" managed="$2"
-  [[ "$managed" == "pm2" ]] && managed="devkit"
   case "$managed" in
     external) echo "external"; return 0 ;;
     devkit)
@@ -1512,45 +1504,50 @@ OUT
 # Wire the devkit MCP server into an AI agent so it can register/manage apps as
 # structured tool calls (instead of relying on a CLAUDE.md text instruction).
 cmd_setup_mcp() {
+  # Prefer a local checkout (handy during development); otherwise run the published
+  # package with `npx -y devkit-mcp`, so a standalone CLI install needs nothing extra.
+  # Either way the agent gets the same stdio MCP server.
   local candidates=(
     "$REPO_HOME/../devkit-mcp/index.js"
     "$REPO_HOME/devkit-mcp/index.js"
-    "$REPO_HOME/mcp-server/index.js"
     "$DEVKIT_HOME/devkit-mcp/index.js"
-    "$DEVKIT_HOME/mcp-server/index.js"
   )
   local server="" c
   for c in "${candidates[@]}"; do
-    if [[ -f "$c" ]]; then
-      server="$(cd "$(dirname "$c")" && pwd)/index.js"
-      break
-    fi
+    if [[ -f "$c" ]]; then server="$(cd "$(dirname "$c")" && pwd)/index.js"; break; fi
   done
-  [[ -n "$server" ]] || die "could not find the devkit MCP server (index.js) — expected near $REPO_HOME/../devkit-mcp/"
 
-  need node
-
-  # Install the MCP's dependencies if missing, otherwise the server crashes on first
-  # call with "Cannot find module @modelcontextprotocol/sdk".
-  local server_dir; server_dir=$(dirname "$server")
-  if [[ ! -d "$server_dir/node_modules/@modelcontextprotocol" ]]; then
-    need npm
-    echo "installing devkit MCP dependencies..."
-    (cd "$server_dir" && npm install --silent) || die "npm install failed in $server_dir"
+  local -a runcmd
+  if [[ -n "$server" ]]; then
+    need node
+    # Install deps if missing, else the server crashes with "Cannot find module
+    # @modelcontextprotocol/sdk" on first call.
+    local server_dir; server_dir=$(dirname "$server")
+    if [[ ! -d "$server_dir/node_modules/@modelcontextprotocol" ]]; then
+      need npm
+      echo "installing devkit MCP dependencies..."
+      (cd "$server_dir" && npm install --silent) || die "npm install failed in $server_dir"
+    fi
+    runcmd=(node "$server")
+  else
+    # Unscoped "devkit-mcp" is taken by an unrelated package on npm, so we publish under
+    # the @djadmin scope. npx fetches it on first use (then caches).
+    need npx
+    runcmd=(npx -y @djadmin/devkit-mcp)
   fi
 
   if command -v claude >/dev/null 2>&1; then
-    if claude mcp add devkit -- node "$server"; then
-      echo "devkit MCP registered with Claude Code. Restart Claude Code to load it."
+    if claude mcp add devkit -- "${runcmd[@]}"; then
+      echo "devkit MCP registered with Claude Code (${runcmd[*]}). Restart Claude Code to load it."
     else
-      die "failed to register the MCP with Claude Code (try: claude mcp add devkit -- node \"$server\")"
+      die "failed to register the MCP with Claude Code (try: claude mcp add devkit -- ${runcmd[*]})"
     fi
   else
     echo "Claude Code CLI not found. Add the devkit MCP to your agent manually:"
-    echo "  command: node"
-    echo "  args:    $server"
+    echo "  command: ${runcmd[0]}"
+    echo "  args:    ${runcmd[*]:1}"
     echo
-    echo "  Claude Code:  claude mcp add devkit -- node \"$server\""
+    echo "  Claude Code:  claude mcp add devkit -- ${runcmd[*]}"
     echo "  Cursor / Windsurf / other: see your agent's MCP config docs."
   fi
 }

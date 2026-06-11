@@ -118,53 +118,17 @@ Browse everything at `http://dash.localhost`.
 
 ---
 
-## Crash Recovery (opt-in)
-
-By default devkit starts an app and steps back — if the app later dies, it stays down
-until you start it again. Opt a devkit-managed app into automatic recovery with a
-restart policy:
-
-```bash
-devkit register api --port 3000 --cmd "npm start" --restart on-failure
-# or change it later:
-devkit update api --restart on-failure        # policies: no (default) | on-failure | always
-```
-
-Then install the background supervisor once:
-
-```bash
-devkit supervise install      # installs a launchd agent that watches your apps
-devkit supervise status       # list supervised apps + agent state
-devkit supervise uninstall    # remove it
-```
-
-How it behaves:
-
-- It only revives apps you actually want running. `devkit start` marks intent up;
-  `devkit stop` / `stop-all` marks it down — so the supervisor **never restarts something
-  you deliberately stopped**.
-- Crash loops are throttled with exponential backoff (5s → capped at 5min), reset once an
-  app comes back healthy.
-- Each pass also re-checks the proxy, so `.localhost` routing self-heals even when no
-  devkit command is running.
-
-`devkit supervise tick` runs a single pass by hand (this is what the launchd agent calls).
-
-Tuning env vars: `DEVKIT_SUPERVISE_INTERVAL` (seconds between checks, default 10),
-`DEVKIT_SUPERVISE_BACKOFF_BASE` (default 5), `DEVKIT_SUPERVISE_BACKOFF_CAP` (default 300).
-For a non-Homebrew Caddy setup, set `DEVKIT_CADDY_MANAGED=1` so reloads still apply.
-
----
-
 ## Reliability
 
-- 97 CLI lifecycle tests (including crash recovery, restart policy, and the launchd plist)
+- 114 CLI lifecycle tests + 23 scan tests
 - 18 installer smoke tests
 - GitHub Actions on fresh macOS runners
 
-Explicitly covers stale pid files, orphan recovery, restart pressure, port conflicts,
-failed starts, out-of-band `apps.json` edits, malformed registries, and supervised crash
-recovery.
+Explicitly covers stale pid files, orphan recovery, port conflicts, fail-fast on a
+crashing start, out-of-band `apps.json` edits, and malformed registries.
+
+devkit manages an app's lifecycle on demand (`start` / `stop` / `restart`); it does not
+run a background daemon, so a crashed app stays down until you start it again.
 
 ```bash
 bash test/test_registry.sh
