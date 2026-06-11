@@ -938,9 +938,22 @@ cmd_start() {
     (( i++ ))
   done
 
-  if ! wait_for_port_state "$port" listening 60; then
+  # Wait for the app to bind its port, but fail fast if the launched process exits first
+  # (e.g. a dev server that crashes on startup) rather than blocking for the full timeout.
+  # We still cap at ~60s for a slow-but-healthy boot. The port check wins over the death
+  # check, so a launcher that forks a child and exits is fine as long as the child binds.
+  local waited=0 bound=false
+  while (( waited < 600 )); do
+    if [[ -n "$(listener_pids_on_port "$port" 2>/dev/null)" ]]; then bound=true; break; fi
+    if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then break; fi
+    sleep 0.1
+    (( waited++ ))
+  done
+  if ! $bound; then
     _stop_by_name "$name" "$port" "$path_for_app" >/dev/null 2>&1 || true
-    echo "devkit: $name failed to bind port $port — check logs: devkit logs $name" >&2
+    local hint="check logs: devkit logs $name"
+    [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null && hint="the start command exited immediately — $hint"
+    echo "devkit: $name failed to bind port $port — $hint" >&2
     return 1
   fi
 
@@ -985,11 +998,30 @@ cmd_restart() {
 }
 
 cmd_logs() {
-  local name="${1:-}"
-  [[ -n "$name" ]] || die "usage: devkit logs <name>"
+  # Default: print the last N lines and EXIT. Following (`tail -f`) only happens with an
+  # explicit -f/--follow, so a non-interactive caller (an AI agent, a script, CI) never
+  # hangs forever waiting on a stream that never closes.
+  local name="" follow=false lines=50 arg
+  while (( $# )); do
+    arg="$1"
+    case "$arg" in
+      -f|--follow) follow=true ;;
+      -n|--lines)  shift; lines="${1:-50}" ;;
+      -n*)         lines="${arg#-n}" ;;
+      -*)          die "usage: devkit logs <name> [-f] [-n LINES]" ;;
+      *)           name="$arg" ;;
+    esac
+    shift
+  done
+  [[ -n "$name" ]] || die "usage: devkit logs <name> [-f] [-n LINES]"
+  [[ "$lines" =~ ^[0-9]+$ ]] || die "devkit logs: -n expects a number"
   local lf; lf=$(log_file "$name")
   [[ -f "$lf" ]] || die "no logs yet for $name (has it been started?)"
-  tail -f "$lf"
+  if $follow; then
+    tail -n "$lines" -f "$lf"
+  else
+    tail -n "$lines" "$lf"
+  fi
 }
 
 cmd_start_all() {

@@ -585,6 +585,50 @@ assert_nonempty "sa2 is listening after start-all" "$(wait_for_port_state 5472 l
 DEVKIT_HOME="$SA_HOME" "$DEVKIT" stop-all >/dev/null 2>&1 || true
 rm -rf "$SA_HOME"
 
+# -- logs must never hang a non-interactive caller (regression: cmd_logs used bare tail -f) --
+echo "--- logs (non-blocking) ---"
+# Portable timeout (macOS has no `timeout`). Uses the alarm+exec idiom: alarm() survives
+# exec and SIGALRM's default disposition kills the process, so a hung command dies on its
+# own. (A fork+waitpid version deadlocks under Perl safe-signals, which is itself a good
+# illustration of why "non-interactive must terminate" needs a test.)
+tmo() { perl -e 'alarm shift @ARGV; exec @ARGV or exit 127' "$@"; }
+LG_HOME=$(mktemp -d); mkdir -p "$LG_HOME/lg"
+cat > "$LG_HOME/lg/serve.sh" <<'SH'
+#!/bin/sh
+echo "log-line-one"; echo "log-line-two"; exec python3 -m http.server "$PORT" --bind 127.0.0.1
+SH
+chmod +x "$LG_HOME/lg/serve.sh"
+DEVKIT_HOME="$LG_HOME" "$DEVKIT" register lg --path "$LG_HOME/lg" --port 5481 --cmd "PORT=5481 ./serve.sh" >/dev/null 2>&1 || true
+DEVKIT_HOME="$LG_HOME" "$DEVKIT" start lg >/dev/null 2>&1 || true
+wait_for_port_state 5481 listening 30 >/dev/null || true
+
+out=$(DEVKIT_HOME="$LG_HOME" tmo 8 "$DEVKIT" logs lg 2>&1); code=$?
+assert_eq "logs exits by default (does not follow/hang)" "0" "$code"
+assert_contains "logs prints recent output" "log-line-one" "$out"
+n=$(DEVKIT_HOME="$LG_HOME" tmo 8 "$DEVKIT" logs lg -n 1 2>&1 | wc -l | tr -d ' ')
+assert_eq "logs -n limits the number of lines" "1" "$n"
+DEVKIT_HOME="$LG_HOME" "$DEVKIT" stop-all >/dev/null 2>&1 || true
+rm -rf "$LG_HOME"
+
+# -- start must fail FAST when the launched command exits immediately (no 60s hang) --
+echo "--- start fast-fail ---"
+FF_HOME=$(mktemp -d); mkdir -p "$FF_HOME/ff"
+cat > "$FF_HOME/ff/boom.sh" <<'SH'
+#!/bin/sh
+echo "crashing on purpose" >&2
+exit 1
+SH
+chmod +x "$FF_HOME/ff/boom.sh"
+DEVKIT_HOME="$FF_HOME" "$DEVKIT" register ff --path "$FF_HOME/ff" --port 5482 --cmd "./boom.sh" >/dev/null 2>&1 || true
+ff_start=$(date +%s)
+ff_code=0
+DEVKIT_HOME="$FF_HOME" "$DEVKIT" start ff >/dev/null 2>&1 || ff_code=$?
+ff_elapsed=$(( $(date +%s) - ff_start ))
+assert_eq "start of an immediately-crashing app fails" "1" "$ff_code"
+assert_eq "start fails fast, well under the 60s bind timeout" "true" "$( [ "$ff_elapsed" -lt 20 ] && echo true || echo false )"
+DEVKIT_HOME="$FF_HOME" "$DEVKIT" stop-all >/dev/null 2>&1 || true
+rm -rf "$FF_HOME"
+
 # ---------- summary ----------
 
 echo
