@@ -57,7 +57,10 @@ P_HTTPS=6706    # HTTPS-only HTML app     -> found via https fallback (if openss
 P_IPV6=6707     # IPv6-only (::1) HTML app -> found via the [::1] probe (Vite v6's default)
 
 start_html_server() { # port directory
-  python3 -m http.server "$1" --directory "$2" >/dev/null 2>&1 &
+  # Bind loopback explicitly. python's default (0.0.0.0) is found locally but not on the
+  # GitHub macOS runner, and real dev servers bind 127.0.0.1/::1 anyway — which is exactly
+  # what scan probes.
+  python3 -m http.server "$1" --bind 127.0.0.1 --directory "$2" >/dev/null 2>&1 &
   PIDS+=("$!")
 }
 start_json_server() { # port
@@ -240,9 +243,11 @@ start=$(date +%s)
 "$DEVKIT" scan --json >/dev/null
 end=$(date +%s)
 elapsed=$((end - start))
-# With batched parallelism, even a busy machine should finish in a few timeouts, not
-# (ports * timeout). Generous ceiling of 15s catches accidental serialization.
-assert_eq "scan finished under 15s" "true" "$( (( elapsed < 15 )) && echo true || echo false )"
+# This scans every listener on the host, so the absolute time scales with how many ports
+# are up (unbounded on a busy dev box). The point is only that batched parallelism keeps it
+# bounded, not (ports * timeout): a 60s ceiling clears any realistic machine while a
+# serialized regression (minutes) still trips it.
+assert_eq "scan finished under 60s" "true" "$( (( elapsed < 60 )) && echo true || echo false )"
 
 # ---------- summary ----------
 echo
