@@ -23,14 +23,14 @@ jobs:
 
       - name: Guard against committing private / generated files
         run: |
-          # Fail if anything machine-specific, generated, or paid ever gets tracked.
+          # Fail if anything machine-specific, generated, or non-public ever gets tracked.
           # .gitignore stops accidental `git add`; this catches a file already committed.
           forbidden=$(git ls-files | grep -E '(^|/)apps\.json$|^pids/|^logs/|^Caddyfile$|^dashboard\.html$|^\.claude/|(^|/)\.DS_Store$' || true)
-          # The paid Mac app lives in the private devkit-app repo; only MenuBarApp/docs/ is public.
-          paid=$(git ls-files 'MenuBarApp/*' | grep -vE '^MenuBarApp/docs/' || true)
-          if [ -n "$forbidden$paid" ]; then
+          # Only MenuBarApp/docs/ (the landing page) is public; app source is not part of this repo.
+          appsrc=$(git ls-files 'MenuBarApp/*' | grep -vE '^MenuBarApp/docs/' || true)
+          if [ -n "$forbidden$appsrc" ]; then
             echo "::error::forbidden files are tracked in this public repo:"
-            printf '%s\n' "$forbidden" "$paid"
+            printf '%s\n' "$forbidden" "$appsrc"
             exit 1
           fi
           echo "repo hygiene OK"

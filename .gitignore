@@ -12,17 +12,16 @@ logs/
 # macOS
 .DS_Store
 
-# PAID Mac app source — lives in the private devkit-app repo, NEVER in this public repo.
-# Blanket-ignore everything under MenuBarApp so a stray `git add .` (or a newly named
-# source file/dir) can't re-leak the paid product. The ONLY exception is docs/, the
-# public landing page served at djadmin.github.io/devkit via the Pages workflow.
+# App source is maintained in a separate repo and is not part of this CLI. Blanket-ignore
+# everything under MenuBarApp so a stray `git add .` (or a newly named file/dir) can't add
+# it. The only public exception is docs/, the landing page served via the Pages workflow.
 MenuBarApp/*
 !MenuBarApp/docs/
 
 # local Claude settings (machine-specific paths, gh allow-rules)
 .claude/settings.local.json
 
-# internal planning — lives in devkit-internal repo
+# internal planning — kept out of this public repo
 LAUNCH.md
 RELEASE_PLAN.md
 IDEAS.md
