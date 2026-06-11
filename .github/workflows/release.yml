@@ -1,0 +1,67 @@
+name: Release
+
+# Tag a release and everything else is automatic: this publishes the GitHub release and
+# bumps the Homebrew formula (url + version + sha256) so `brew install/upgrade devkit`
+# always tracks the latest tag. The only manual step is `git tag vX.Y.Z && git push --tags`.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version and source-tarball sha256
+        id: meta
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${TAG#v}"
+          URL="https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz"
+          # The tag archive can lag a few seconds behind the tag push; retry briefly.
+          SHA=""
+          for _ in 1 2 3 4 5 6; do
+            SHA=$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}') || SHA=""
+            [ -n "$SHA" ] && break
+            sleep 5
+          done
+          [ -n "$SHA" ] || { echo "::error::could not compute sha256 for $URL"; exit 1; }
+          {
+            echo "version=$VERSION"
+            echo "url=$URL"
+            echo "sha256=$SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$REPO" --title "devkit $VERSION" --generate-notes
+
+      - name: Bump Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          URL: ${{ steps.meta.outputs.url }}
+          SHA256: ${{ steps.meta.outputs.sha256 }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/djadmin/homebrew-tap.git"
+          cd homebrew-tap
+          # Update only the CLI formula (devkit.rb); the app cask lives in Casks/ and is
+          # released from the devkit-app repo.
+          sed -i "s|^  url \".*\"|  url \"$URL\"|"        devkit.rb
+          sed -i "s|^  sha256 \".*\"|  sha256 \"$SHA256\"|" devkit.rb
+          sed -i "s|^  version \".*\"|  version \"$VERSION\"|" devkit.rb
+          git config user.email "ci@devkit"
+          git config user.name "devkit-ci"
+          git add devkit.rb
+          git diff --staged --quiet || git commit -m "devkit $VERSION"
+          git push

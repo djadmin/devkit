@@ -35,6 +35,27 @@ asserts a stray `~/devkit` is ignored, not adopted).
 The live registry is `apps.json`, which is local-only and gitignored.
 The committed example registry is `apps.example.json`.
 
+## Consumer contract (the Mac app + MCP build on this)
+
+The CLI is the single brain; the menu bar app and the MCP server are thin clients that
+shell out to it and parse its output. Treat these as a stable public contract — other
+programs depend on them, so do not break them casually:
+
+- `devkit list --json` — one JSON object per app (`name`, `port`, `hostname`, `state`,
+  `path`, `managedBy`, and the failed-start reason / log path). This is how clients read
+  state instead of re-deriving it (which would drift). `state` is one of
+  `running | stopped | failed | external`.
+- `devkit paths` — `KEY=value` lines (`DEVKIT_HOME`, `APPS_JSON`, `LOGS_DIR`, ...). Clients
+  resolve locations from here, never by hardcoding `~/.devkit`.
+- `devkit scan --json`, `devkit doctor --json` — machine-readable, same spirit.
+- **Exit codes matter**: 0 = success, non-zero = failure (clients branch on this).
+- **Every command must terminate** non-interactively (no `tail -f`-style hangs) — an agent
+  or the app may invoke any of them.
+
+Versioning: additive changes (new fields/commands) are a minor bump; renaming/removing a
+field or changing `state` values is a breaking change — bump major and update the app/MCP
+in lockstep. Keeping this contract stable is what lets the three surfaces stay in sync.
+
 ## Generated files
 
 Do not edit these by hand:
