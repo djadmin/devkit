@@ -434,7 +434,10 @@ assert_contains "crash start reports bind failure" "failed to bind port 5094" "$
 assert_eq "crash app pid file cleaned up" "false" "$( [[ -f "$TMP_HOME/pids/crash-app.pid" ]] && echo true || echo false )"
 out=$("$DEVKIT" list 2>&1 || true)
 line=$(printf '%s\n' "$out" | grep -E '^crash-app[[:space:]]+5094[[:space:]]+' || true)
-assert_contains "crash app shows stopped after failed start" "stopped" "$line"
+# A crashed start is now a DISTINCT, actionable state — not the ambiguous "stopped" that
+# looked identical to never-started (see the failed-start visibility section below).
+assert_contains    "crash app shows 'failed' after failed start" "failed" "$line"
+assert_not_contains "failed start is not reported as plain stopped" "stopped" "$line"
 
 # -- unknown command --
 echo "--- error handling ---"
@@ -628,6 +631,92 @@ assert_eq "start of an immediately-crashing app fails" "1" "$ff_code"
 assert_eq "start fails fast, well under the 60s bind timeout" "true" "$( [ "$ff_elapsed" -lt 20 ] && echo true || echo false )"
 DEVKIT_HOME="$FF_HOME" "$DEVKIT" stop-all >/dev/null 2>&1 || true
 rm -rf "$FF_HOME"
+
+# -- start reports success truthfully (errexit regression) --
+# A standalone `(( waited++ ))` returns exit 1 when the counter is 0, which under
+# `set -euo pipefail` aborted cmd_start AFTER the app had already launched: start then
+# printed nothing and returned non-zero on a *successful* start (it lied about state).
+# A deliberately slow bind forces the bind-wait loop to iterate so the increment runs;
+# start must still report "started" and exit 0.
+echo "--- start truthful success (errexit regression) ---"
+ST_HOME=$(mktemp -d); mkdir -p "$ST_HOME/slow"
+cat > "$ST_HOME/slow/serve.sh" <<'SH'
+#!/bin/sh
+sleep 1
+exec python3 -m http.server "$PORT" --bind 127.0.0.1
+SH
+chmod +x "$ST_HOME/slow/serve.sh"
+DEVKIT_HOME="$ST_HOME" "$DEVKIT" register slow --path "$ST_HOME/slow" --port 5491 --cmd "PORT=5491 ./serve.sh" >/dev/null 2>&1 || true
+st_code=0
+st_out=$(DEVKIT_HOME="$ST_HOME" "$DEVKIT" start slow 2>&1) || st_code=$?
+assert_eq       "slow-binding start exits 0 on success" "0" "$st_code"
+assert_contains "slow-binding start reports started"    "started slow" "$st_out"
+DEVKIT_HOME="$ST_HOME" "$DEVKIT" stop-all >/dev/null 2>&1 || true
+rm -rf "$ST_HOME"
+
+# -- failed-start visibility (no dead ends) --
+# A failed start must be a DISTINCT state from "never started" and must point at the log.
+# Previously a crashed start showed as plain "stopped" with no breadcrumb.
+echo "--- failed-start visibility ---"
+FV_HOME=$(mktemp -d); mkdir -p "$FV_HOME/fv"
+cat > "$FV_HOME/fv/boom.sh" <<'SH'
+#!/bin/sh
+echo "boom" >&2; exit 1
+SH
+chmod +x "$FV_HOME/fv/boom.sh"
+DEVKIT_HOME="$FV_HOME" "$DEVKIT" register fv --path "$FV_HOME/fv" --port 5492 --cmd "./boom.sh" >/dev/null 2>&1 || true
+state0=$(DEVKIT_HOME="$FV_HOME" "$DEVKIT" list --json 2>/dev/null | jq -r '.[] | select(.name=="fv") | .state')
+assert_eq "never-started app is stopped" "stopped" "$state0"
+DEVKIT_HOME="$FV_HOME" "$DEVKIT" start fv >/dev/null 2>&1 || true
+fv_txt=$(DEVKIT_HOME="$FV_HOME" "$DEVKIT" list 2>&1)
+assert_contains "failed start shows 'failed' in list"   "failed"      "$fv_txt"
+assert_contains "list points a failed app at its logs"  "devkit logs" "$fv_txt"
+fv_json=$(DEVKIT_HOME="$FV_HOME" "$DEVKIT" list --json 2>/dev/null)
+assert_eq        "list --json marks state failed"  "failed" "$(jq -r '.[]|select(.name=="fv")|.state' <<<"$fv_json")"
+assert_nonempty  "list --json includes a failReason"        "$(jq -r '.[]|select(.name=="fv")|.failReason' <<<"$fv_json")"
+assert_contains  "list --json includes the log path" "fv.log" "$(jq -r '.[]|select(.name=="fv")|.logFile' <<<"$fv_json")"
+DEVKIT_HOME="$FV_HOME" "$DEVKIT" stop fv >/dev/null 2>&1 || true
+assert_eq "an explicit stop clears the failed state" "stopped" \
+  "$(DEVKIT_HOME="$FV_HOME" "$DEVKIT" list --json 2>/dev/null | jq -r '.[]|select(.name=="fv")|.state')"
+# Re-fail, then a successful start must clear the marker (no explicit stop in between).
+DEVKIT_HOME="$FV_HOME" "$DEVKIT" start fv >/dev/null 2>&1 || true
+DEVKIT_HOME="$FV_HOME" "$DEVKIT" update fv --cmd "python3 -m http.server 5492 --bind 127.0.0.1" >/dev/null 2>&1 || true
+DEVKIT_HOME="$FV_HOME" "$DEVKIT" start fv >/dev/null 2>&1 || true
+assert_eq "a successful start clears the failed state" "running" \
+  "$(DEVKIT_HOME="$FV_HOME" "$DEVKIT" list --json 2>/dev/null | jq -r '.[]|select(.name=="fv")|.state')"
+DEVKIT_HOME="$FV_HOME" "$DEVKIT" stop-all >/dev/null 2>&1 || true
+rm -rf "$FV_HOME"
+
+# -- external apps render as 'external' even with no path (column-shift regression) --
+# An empty path used to collapse under IFS=$'\t' (tab is IFS-whitespace), shifting every
+# later column so a path-less external app showed as plain "stopped". Records are now
+# \x1f-separated, which preserves empty fields.
+echo "--- external state (column-shift regression) ---"
+EX_HOME=$(mktemp -d)
+DEVKIT_HOME="$EX_HOME" "$DEVKIT" register exns --managed-by external >/dev/null 2>&1 || true
+ex_line=$(DEVKIT_HOME="$EX_HOME" "$DEVKIT" list 2>&1 | grep -E '^exns[[:space:]]' || true)
+assert_contains     "path-less external app shows 'external' in list"   "external" "$ex_line"
+assert_not_contains "path-less external app is not mislabeled stopped"  "stopped"  "$ex_line"
+assert_eq "list --json marks a path-less external app as external" "external" \
+  "$(DEVKIT_HOME="$EX_HOME" "$DEVKIT" list --json 2>/dev/null | jq -r '.[]|select(.name=="exns")|.state')"
+rm -rf "$EX_HOME"
+
+# -- clone is non-interactive (never hangs on credentials / host-key) --
+# A bare `git clone` of a private repo prompts on the TTY and blocks forever for an agent
+# or script. clone must disable those prompts and fail fast with a next action.
+echo "--- clone non-interactive ---"
+CL_HOME=$(mktemp -d)
+cl_bogus="/tmp/dk-no-such-repo-$$"     # not a git repo -> clone fails immediately
+cl_dest="$CL_HOME/dest"
+DEVKIT_HOME="$CL_HOME" "$DEVKIT" register clo --managed-by external --repo "$cl_bogus" --path "$cl_dest" >/dev/null 2>&1 || true
+cl_start=$(date +%s); cl_code=0
+DEVKIT_HOME="$CL_HOME" perl -e 'alarm shift @ARGV; exec @ARGV' 15 "$DEVKIT" clone clo >/dev/null 2>&1 || cl_code=$?
+cl_elapsed=$(( $(date +%s) - cl_start ))
+assert_eq "clone of an unreachable repo fails, not hangs" "true" \
+  "$( [ "$cl_code" -ne 0 ] && [ "$cl_code" -ne 142 ] && echo true || echo false )"
+assert_eq "clone terminates well under the timeout" "true" "$( [ "$cl_elapsed" -lt 15 ] && echo true || echo false )"
+assert_contains "clone keeps git credential prompt disabled" "GIT_TERMINAL_PROMPT=0" "$(cat "$DEVKIT")"
+rm -rf "$CL_HOME"
 
 # ---------- summary ----------
 

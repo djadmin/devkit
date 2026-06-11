@@ -54,6 +54,7 @@ P_JSON=6703     # JSON API               -> should be excluded (not HTML)
 P_DEAD=6704     # nothing listening       -> nothing to find
 P_NOTITLE=6705  # HTML with no <title>    -> found, process-port fallback name
 P_HTTPS=6706    # HTTPS-only HTML app     -> found via https fallback (if openssl present)
+P_IPV6=6707     # IPv6-only (::1) HTML app -> found via the [::1] probe (Vite v6's default)
 
 start_html_server() { # port directory
   python3 -m http.server "$1" --directory "$2" >/dev/null 2>&1 &
@@ -91,6 +92,21 @@ httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True); httpd.serve_fore
 PY
   PIDS+=("$!"); return 0
 }
+start_ipv6_server() { # port  (binds ::1 ONLY — mirrors Vite v6, which an IPv4-only probe misses)
+  python3 - "$1" >/dev/null 2>&1 <<'PY' &
+import sys, socket, http.server
+port = int(sys.argv[1])
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.send_header('Content-Type','text/html'); self.end_headers()
+        self.wfile.write(b'<!DOCTYPE html><html><head><title>IPv6 App</title></head><body>x</body></html>')
+    def log_message(self, *a): pass
+class S(http.server.HTTPServer):
+    address_family = socket.AF_INET6
+S(('::1', port), H).serve_forever()
+PY
+  PIDS+=("$!")
+}
 
 # ---------- fixtures ----------
 printf '<!DOCTYPE html><html><head><title>My Vite Dashboard</title></head><body>hi</body></html>' > "$WEBROOT/index.html"
@@ -108,7 +124,10 @@ start_html_server "$P_REG"  "$WEBROOT"
 start_html_server "$P_NOTITLE" "$NOTITLE_ROOT"
 start_json_server "$P_JSON"
 HTTPS_UP=0; start_https_server "$P_HTTPS" && HTTPS_UP=1
+start_ipv6_server "$P_IPV6"
 sleep 2   # let servers bind (https cert gen needs a moment)
+# IPv6 loopback isn't guaranteed in every CI sandbox; only assert it if the bind worked.
+IPV6_UP=0; lsof -tiTCP:"$P_IPV6" -sTCP:LISTEN >/dev/null 2>&1 && IPV6_UP=1
 
 # ---------- scan --json ----------
 echo "--- scan --json: detection & classification ---"
@@ -144,6 +163,17 @@ if [[ "$HTTPS_UP" == 1 ]]; then
   assert_eq "HTTPS app records scheme=https" "https" "$https_scheme"
 else
   echo "  SKIP  HTTPS fallback (openssl unavailable)"
+fi
+
+# Regression: a server bound to ::1 ONLY (Vite v6's default) is enumerated by lsof but
+# was dropped by the old 127.0.0.1-only probe. scan must probe the [::1] family too.
+if [[ "$IPV6_UP" == 1 ]]; then
+  found_ipv6=$(jq --argjson p "$P_IPV6" 'any(.[]; .port==$p)' <<<"$JSON_OUT")
+  assert_eq "IPv6-only (::1) app is found via the [::1] probe" "true" "$found_ipv6"
+  ipv6_scheme=$(jq -r --argjson p "$P_IPV6" '.[] | select(.port==$p) | .scheme' <<<"$JSON_OUT")
+  assert_eq "IPv6-only app records scheme=http" "http" "$ipv6_scheme"
+else
+  echo "  SKIP  IPv6-only probe (::1 loopback unavailable in this environment)"
 fi
 
 # ---------- name suggestion ----------
